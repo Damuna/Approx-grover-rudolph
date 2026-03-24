@@ -1,4 +1,5 @@
 import numpy as np
+from functools import reduce
 
 from .helping_functions import (
     ZERO,
@@ -18,6 +19,7 @@ from .approx_algorithm import (
 __all__ = [
     "build_dictionary",
     "grover_rudolph",
+    "GR_circuit",
 ]
 
 GateCounts = np.ndarray
@@ -262,3 +264,58 @@ def grover_rudolph(
     final_gates.reverse()
 
     return final_gates
+
+
+def GR_circuit(dict_list: list[ControlledRotationGateMap]) -> np.ndarray:
+    """
+    The same procedure is applied to the phases, and at the end the two dictionaries are merged together, taking into account the commutation rules.
+    Build the circuit of the state preparation with as input the list of dictonaries (good to check if the preparation is succesfull)
+
+    Returns:
+         The final state and the number of gates needed (Number of Toffoli gates, 2qubits gate and 1qubit gate)
+    """
+
+    # Vector to apply the circuit to
+    psi = np.zeros(2 ** len(dict_list))
+    psi[0] = float(1)
+
+    e0 = np.array([float(1), float(0)])  # zero state
+    e1 = np.array([float(0), float(1)])
+
+    Id = np.eye(2)
+
+    control_matrix: dict[str, np.ndarray] = {
+        "e": Id,
+        "0": np.outer(e0, e0),
+        "1": np.outer(e1, e1),
+    }
+
+    for i, gates in enumerate(dict_list):
+        # Build the unitary for each dictonary
+        for k, (theta, phase) in gates.items():
+            if theta is None:
+                R = Id
+            else:
+                R = np.array(
+                    [
+                        [np.cos(theta / 2), -np.sin(theta / 2)],
+                        [np.sin(theta / 2), np.cos(theta / 2)],
+                    ]
+                )
+
+            if phase is None:
+                P_phase = np.eye(2)
+            else:
+                P_phase = np.array([[1.0, 0.0], [0.0, np.exp(1j * phase)]])
+
+            # tensor product of all the 2x2 control matrices
+            P = reduce(np.kron, [control_matrix[s] for s in k], np.eye(1))
+
+            U = np.kron(P, P_phase @ R) + np.kron(np.eye(2**i) - P, Id)
+
+            extra = len(dict_list) - i - 1
+            U = np.kron(U, np.eye(2**extra))
+
+            psi = U @ psi
+
+    return psi

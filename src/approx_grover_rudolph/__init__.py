@@ -24,6 +24,7 @@ from .approx_algorithm import (
 from .grover_rudolph import (
     grover_rudolph,
     build_dictionary,
+    GR_circuit,
 )
 
 from .gate_count import (
