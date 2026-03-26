@@ -79,8 +79,6 @@ def hybrid_CNOT_count(
             else:
                 N_cnot_layer += 16 * (N_controls) - 24
 
-        N_cnot += N_cnot_layer
-
         # Uniform rotation counting
         if N_cnot_layer > 2 ** len(k):
             N_cnot_layer = 2 ** len(k)
