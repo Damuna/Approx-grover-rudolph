@@ -8,7 +8,7 @@ The code for the algorithm is in the folder `src/grover_rudolph`.
 - `grover_rudolph.py`
 - `gate_count.py`
 
-In the `scripts/`` folder, there are two files: 
+In the `scripts/` folder, there are two files: 
 - `simulation.py`
 - `vector_simulation.py`
 
