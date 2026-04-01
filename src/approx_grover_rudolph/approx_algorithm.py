@@ -18,143 +18,347 @@ __all__=[
 ]
 
 
-def merging_formula(controls, gate_operations, original_keys, eps):
-    # Given a mearging of the keys k1 and k2 in the dictionary angles_phases, with precision epsilon, returns the new overlap
+def _pattern_matches(pattern, bit_string):
+    return all(p == "e" or p == b for p, b in zip(pattern, bit_string))
 
-    B_set = generate_strings(controls)
-    Delta = 0
 
-    for bit_string in B_set:
-        f_product = 1
+def _patterns_overlap(p1, p2):
+    return all(a == "e" or b == "e" or a == b for a, b in zip(p1, p2))
+
+
+def _matching_value(prefix, angles_phases_dict):
+    """
+    Return the most specific gate in angles_phases_dict matching the concrete prefix.
+    Needed because the dictionaries can contain keys with 'e'.
+    """
+    best_value = None
+    best_specificity = -1
+
+    for pattern, value in angles_phases_dict.items():
+        if len(pattern) != len(prefix):
+            continue
+        if _pattern_matches(pattern, prefix):
+            specificity = sum(ch != "e" for ch in pattern)
+            if specificity > best_specificity:
+                best_specificity = specificity
+                best_value = value
+
+    return best_value if best_value is not None else (0.0, 0.0)
+
+
+def _probability_weight(pattern, baseline_ops, prob_cache):
+    """
+    P(pattern) computed from the fixed baseline circuit, not from the updated one.
+    """
+    if pattern in prob_cache:
+        return prob_cache[pattern]
+
+    total = 0.0
+    for bit_string in generate_strings(pattern):
+        f_product = 1.0
         for i in range(len(bit_string)):
-            b_i = bit_string[:i]
-            # print("b", b_i)
-            angles_phases = gate_operations[len(b_i)]
-            if b_i in angles_phases:
-                theta = angles_phases[b_i][0]
-            elif b_i in original_keys:
-                theta = original_keys[b_i][0]
-            else:
-                theta = 0.0
+            prefix = bit_string[:i]
+            theta = _matching_value(prefix, baseline_ops[len(prefix)])[0]
             f_product *= f_cs(theta, bit_string[i])
-        Delta += f_product
+        total += f_product
 
-    overlap = 1 - ((1 - np.cos(eps / 2)) * Delta)
+    prob_cache[pattern] = total
+    return total
 
-    return overlap
 
-def ordering_geometric_series(gate_operations, min_overlap, m_steps, error = np.pi/2):
+def _initialize_merge_state(gate_operations):
+    """
+    baseline_ops: fixed copy of the circuit at the beginning of the approximate stage
+    sources[(layer, key)]: dict {baseline_pattern: baseline_theta}
+    losses[(layer, key)]: current cluster loss with respect to the baseline
+    """
+    baseline_ops = [dict(layer_dict) for layer_dict in gate_operations]
+    return {
+        "baseline_ops": baseline_ops,
+        "sources": {},
+        "losses": {},
+        "prob_cache": {},
+    }
 
-    # Initialize
+
+def _cluster_id(key):
+    return (len(key), key)
+
+
+def _get_cluster_sources(key, gate_operations, merge_state):
+    """
+    Lazily initialize a cluster if it has never been merged before.
+    """
+    cid = _cluster_id(key)
+    if cid not in merge_state["sources"]:
+        theta = gate_operations[len(key)][key][0]
+        merge_state["sources"][cid] = {key: theta}
+        merge_state["losses"][cid] = 0.0
+
+    return dict(merge_state["sources"][cid])
+
+
+def _cluster_loss(source_map, new_theta, merge_state):
+    """
+    Exact local loss of one merged cluster against the baseline angles.
+    This is the key improvement: repeated non-disjoint merges are not
+    summed one-by-one anymore; the whole cluster is recomputed at once.
+    """
+    loss = 0.0
+    baseline_ops = merge_state["baseline_ops"]
+    prob_cache = merge_state["prob_cache"]
+
+    for pattern, theta_orig in source_map.items():
+        p = _probability_weight(pattern, baseline_ops, prob_cache)
+        loss += (1.0 - np.cos((theta_orig - new_theta) / 2.0)) * p
+
+    return loss
+
+
+def _optimal_cluster_angle(source_map, merge_state):
+    """
+    Choose the common merged angle that maximizes the estimated overlap
+    inside the cluster. This is especially important for merges with an
+    imaginary zero.
+    """
+    x = 0.0
+    y = 0.0
+    baseline_ops = merge_state["baseline_ops"]
+    prob_cache = merge_state["prob_cache"]
+
+    for pattern, theta_orig in source_map.items():
+        p = _probability_weight(pattern, baseline_ops, prob_cache)
+        x += p * np.cos(theta_orig / 2.0)
+        y += p * np.sin(theta_orig / 2.0)
+
+    return 2.0 * np.arctan2(y, x)
+
+
+def _zero_partner_pattern(key, position):
+    flipped = "1" if key[position] == "0" else "0"
+    return key[:position] + flipped + key[position + 1:]
+
+
+def _support_is_empty(pattern, angles_phases_dict, excluded_keys=()):
+    """
+    True iff no active gate overlaps the support of 'pattern',
+    except for keys explicitly excluded.
+    """
+    excluded_keys = set(excluded_keys)
+    for other_key in angles_phases_dict:
+        if other_key in excluded_keys:
+            continue
+        if _patterns_overlap(pattern, other_key):
+            return False
+    return True
+
+
+def _candidate_source_map(k1, k2, gate_operations, merge_state, zero_partner=None):
+    """
+    Build the baseline source map of the candidate merged cluster and
+    return the total old loss that will be replaced by the new cluster loss.
+    """
+    source_map = _get_cluster_sources(k1, gate_operations, merge_state)
+    old_loss = merge_state["losses"][_cluster_id(k1)]
+
+    if k2 is not None:
+        source_map.update(_get_cluster_sources(k2, gate_operations, merge_state))
+        old_loss += merge_state["losses"][_cluster_id(k2)]
+    elif zero_partner is not None:
+        source_map[zero_partner] = 0.0
+
+    return source_map, old_loss
+
+
+def merging_formula(k1, k2, new_key, gate_operations, merge_state, overlap,
+                    zero_partner=None, new_phase=0.0):
+    """
+    Return the global overlap estimate after replacing the old cluster(s)
+    by the new merged cluster.
+
+    This no longer uses
+        overlap_new = overlap - Delta_i
+    blindly.
+
+    Instead, it does
+        overlap_new = overlap + old_cluster_loss - new_cluster_loss,
+    which is what fixes repeated non-disjoint merges.
+    """
+    source_map, old_loss = _candidate_source_map(
+        k1, k2, gate_operations, merge_state, zero_partner=zero_partner
+    )
+
+    theta_new = _optimal_cluster_angle(source_map, merge_state)
+    new_loss = _cluster_loss(source_map, theta_new, merge_state)
+    overlap_estimate = overlap + old_loss - new_loss
+    new_value = (theta_new, new_phase)
+
+    return overlap_estimate, new_value, source_map, new_loss
+
+
+def ordering_geometric_series(gate_operations, min_overlap, m_steps, error=np.pi / 2):
     flag = True
-    overlap = 1.
-    min_overlap_step = 1.
-    original_keys = {}
+    overlap = 1.0
+    merge_state = _initialize_merge_state(gate_operations)
+    total_merges = 0
+    zero_merges = 0
 
-    # Linear step
-    step = (1 - min_overlap) / m_steps
+    step = (1.0 - min_overlap) / m_steps
+    min_overlap_step = 1.0
 
-    # Merge all possible merges, increasing min_overlap with a geometric series
-    for i in range(m_steps):
+    for _ in range(m_steps):
         min_overlap_step -= step
-        overlap, flag = order_pairs_optimally(gate_operations, min_overlap_step, error, overlap = overlap, original_keys = original_keys)
+        overlap, flag, tm, zm = order_pairs_optimally(
+            gate_operations,
+            min_overlap_step,
+            error,
+            overlap=overlap,
+            merge_state=merge_state,
+        )
+        total_merges += tm
+        zero_merges += zm
 
-    # Take care of the remaing mergings if left
-    while flag == True:
-        overlap, flag = order_pairs_optimally(gate_operations, min_overlap, error, overlap = overlap, original_keys = original_keys)
-    return overlap
+    while flag:
+        overlap, flag, tm, zm = order_pairs_optimally(
+            gate_operations,
+            min_overlap,
+            error,
+            overlap=overlap,
+            merge_state=merge_state,
+        )
+        total_merges += tm
+        zero_merges += zm
+
+    return overlap, total_merges, zero_merges
 
 
-def order_pairs_optimally(gate_operations, min_overlap, error, overlap = 1, original_keys = None):
+def order_pairs_optimally(gate_operations, min_overlap, error, overlap=1.0, merge_state=None):
+    if merge_state is None:
+        merge_state = _initialize_merge_state(gate_operations)
+
     pairs = []
-    if original_keys == None:
-        original_keys = {}
+    total_merges = 0
+    zero_merges = 0
 
     for angles_phases_dict in gate_operations:
-
-        for k1, v1 in angles_phases_dict.items():
+        # list(...) avoids "dictionary keys changed during iteration"
+        for k1, v1 in list(angles_phases_dict.items()):
             neighbours = neighbour_dict(k1)
 
-            # Merge with an imaginary (0,0) gate on the first control that is not 'e'
+            # ----- merge with an imaginary zero -----
             if k1 != "e" * len(k1) and abs(v1[0]) <= 2 * error:
                 new_key, merging_position = replace_first_non_e(k1)
-                overlap_estimate = merging_formula(
-                    new_key,
-                    gate_operations,
-                    original_keys,
-                    eps=np.abs(v1[0]) / 2,
-                )
-                if abs(overlap - (1 - overlap_estimate)) >= min_overlap:
-                    new_value = (v1[0] / 2, v1[1] / 2)
-                    pairs.append(
-                        (k1, None, new_key, new_value, overlap_estimate, np.abs(v1[0]) / 2)
+                zero_partner = _zero_partner_pattern(k1, merging_position)
+
+                # Only treat it as an imaginary zero if that support is really empty
+                if _support_is_empty(zero_partner, angles_phases_dict, excluded_keys=(k1,)):
+                    overlap_estimate, new_value, _, _ = merging_formula(
+                        k1=k1,
+                        k2=None,
+                        new_key=new_key,
+                        gate_operations=gate_operations,
+                        merge_state=merge_state,
+                        overlap=overlap,
+                        zero_partner=zero_partner,
+                        new_phase=v1[1] / 2.0,
                     )
 
-            # Try merging with other gates
+                    if overlap_estimate >= min_overlap:
+                        pairs.append(
+                            (k1, None, new_key, new_value, overlap_estimate, zero_partner)
+                        )
+
+            # ----- merge with a real neighbour -----
             for k2, position in neighbours.items():
                 if k2 not in angles_phases_dict:
                     continue
 
-                v2 = angles_phases_dict[k2]
-                eps_theta = abs(v1[0] - v2[0]) / 2
-                eps_phi = abs(v1[1] - v2[1]) / 2
+                # Avoid adding the same pair twice
+                if k2 <= k1:
+                    continue
 
-                # Consider only different items with same angle and phase up to some error
+                v2 = angles_phases_dict[k2]
+                eps_theta = abs(v1[0] - v2[0]) / 2.0
+                eps_phi = abs(v1[1] - v2[1]) / 2.0
+
                 if (eps_theta > error) or (eps_phi > error):
                     continue
 
-                new_key = k1[:position] + "e" + k1[position + 1 :]
-                new_value = (
-                    min(v2[0], v1[0]) + (np.abs(v2[0] - v1[0]) / 2),
-                    min(v2[1], v1[1]) + (np.abs(v2[1] - v1[1]) / 2),
+                new_key = k1[:position] + "e" + k1[position + 1:]
+                overlap_estimate, new_value, _, _ = merging_formula(
+                    k1=k1,
+                    k2=k2,
+                    new_key=new_key,
+                    gate_operations=gate_operations,
+                    merge_state=merge_state,
+                    overlap=overlap,
+                    zero_partner=None,
+                    new_phase=(v1[1] + v2[1]) / 2.0,
                 )
 
-                overlap_estimate = merging_formula(
-                    new_key,
-                    gate_operations,
-                    original_keys,
-                    eps=np.abs(v1[0] - v2[0]) / 2,
-                )
-
-                if abs(overlap - (1 - overlap_estimate)) >= min_overlap:
+                if overlap_estimate >= min_overlap:
                     pairs.append(
-                        (k1, k2, new_key, new_value, overlap_estimate, np.abs(v1[0] - v2[0]) / 2)
+                        (k1, k2, new_key, new_value, overlap_estimate, None)
                     )
+
     if pairs == []:
-        return overlap, False
+        return overlap, False, 0, 0
 
-    # Sort pairs by overlap (key at index 4)
     pairs = sorted(pairs, key=lambda x: x[4], reverse=True)
+    merged_any = False
 
-    for k1, k2, new_key, new_value, overlap_estimate, eps in pairs:
+    for k1, k2, new_key, _, _, zero_partner in pairs:
         angles_phases_dict = gate_operations[len(k1)]
-        if (k1 in angles_phases_dict) and (k2 in angles_phases_dict or k2 == None):
-            # Compute trace distance exactly (with merged values)
-            overlap_merging = merging_formula(
-                new_key,
-                gate_operations,
-                original_keys,
-                eps=eps,
-            )
-            overlap = abs(overlap - (1 - overlap_merging))
 
-            # Stop merging, since you have reached the desired precision
-            if overlap < min_overlap:
-                return abs(overlap + (1 - overlap_merging)), False
+        if k1 not in angles_phases_dict:
+            continue
+        if (k2 is not None) and (k2 not in angles_phases_dict):
+            continue
 
-            # Merge k1 and k2
-            angles_phases_dict.pop(k1)
-            if k2 != None:
-                angles_phases_dict.pop(k2)
-            angles_phases_dict[new_key] = new_value
+        # Recompute using the current state, because previous accepted merges
+        # may have changed the source cluster of k1 or k2.
+        if k2 is None:
+            current_phase = angles_phases_dict[k1][1] / 2.0
+        else:
+            current_phase = (angles_phases_dict[k1][1] + angles_phases_dict[k2][1]) / 2.0
 
-            # Update original keys with merged value
-            original_keys[k1] = new_value
-            if k2 != None:
-                original_keys[k2] = new_value
+        overlap_estimate, new_value, source_map, new_loss = merging_formula(
+            k1=k1,
+            k2=k2,
+            new_key=new_key,
+            gate_operations=gate_operations,
+            merge_state=merge_state,
+            overlap=overlap,
+            zero_partner=zero_partner,
+            new_phase=current_phase,
+        )
 
-    # Mergings done
-    return overlap, True
+        if overlap_estimate < min_overlap:
+            continue
+
+        # Remove old active gates
+        angles_phases_dict.pop(k1)
+        merge_state["sources"].pop(_cluster_id(k1), None)
+        merge_state["losses"].pop(_cluster_id(k1), None)
+
+        if k2 is not None:
+            angles_phases_dict.pop(k2)
+            merge_state["sources"].pop(_cluster_id(k2), None)
+            merge_state["losses"].pop(_cluster_id(k2), None)
+
+        # Add the new active gate
+        angles_phases_dict[new_key] = new_value
+        merge_state["sources"][_cluster_id(new_key)] = source_map
+        merge_state["losses"][_cluster_id(new_key)] = new_loss
+
+        overlap = overlap_estimate
+        total_merges += 1
+        merged_any = True
+
+        if k2 is None:
+            zero_merges += 1
+
+    return overlap, merged_any, total_merges, zero_merges
 
 
 def optimize_dict(
