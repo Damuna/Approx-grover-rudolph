@@ -29,7 +29,7 @@ M = 10
 repeat = 20
 n_points = 10
 vec_type = "real"
-n_qubit = 10
+n_qubit = 12
 d_values = [5, 10, 50, 100]
 min_overlap_values = np.linspace(0.5, 1, num=n_points)
 

@@ -32,8 +32,8 @@ M = 20
 repeat = 20
 n_points = 5
 vec_type = "real"
-n_qubit = 4
-d_values = [10]
+n_qubit = 15
+d_values = [10, 50, 100]
 min_overlap_values = np.linspace(0.8, 1, num=n_points)
 
 # ── Folders ──
