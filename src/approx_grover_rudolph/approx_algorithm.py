@@ -66,15 +66,61 @@ def _probability_weight(pattern, baseline_ops, prob_cache):
     return total
 
 
+def _build_baseline_support(baseline_ops, tol=1e-15):
+    """
+    Build the nonzero leaves of the baseline circuit together with their
+    probabilities. For a d-sparse target state, this list has size O(d).
+    """
+    n_layers = len(baseline_ops)
+    support = []
+
+    def dfs(prefix, prob):
+        depth = len(prefix)
+        if depth == n_layers:
+            if prob > tol:
+                support.append((prefix, prob))
+            return
+
+        theta = _matching_value(prefix, baseline_ops[depth])[0]
+
+        p0 = prob * f_cs(theta, "0")
+        if p0 > tol:
+            dfs(prefix + "0", p0)
+
+        p1 = prob * f_cs(theta, "1")
+        if p1 > tol:
+            dfs(prefix + "1", p1)
+
+    dfs("", 1.0)
+    return support
+
+
+def _probability_weight(pattern, baseline_support, prob_cache):
+    """
+    P(pattern) computed from the sparse baseline support, not by expanding
+    all bit strings compatible with the pattern.
+    """
+    if pattern in prob_cache:
+        return prob_cache[pattern]
+
+    k = len(pattern)
+    total = 0.0
+
+    for leaf, prob in baseline_support:
+        if _pattern_matches(pattern, leaf[:k]):
+            total += prob
+
+    prob_cache[pattern] = total
+    return total
+
+
 def _initialize_merge_state(gate_operations):
-    """
-    baseline_ops: fixed copy of the circuit at the beginning of the approximate stage
-    sources[(layer, key)]: dict {baseline_pattern: baseline_theta}
-    losses[(layer, key)]: current cluster loss with respect to the baseline
-    """
     baseline_ops = [dict(layer_dict) for layer_dict in gate_operations]
+    baseline_support = _build_baseline_support(baseline_ops)
+
     return {
         "baseline_ops": baseline_ops,
+        "baseline_support": baseline_support,
         "sources": {},
         "losses": {},
         "prob_cache": {},
@@ -99,35 +145,25 @@ def _get_cluster_sources(key, gate_operations, merge_state):
 
 
 def _cluster_loss(source_map, new_theta, merge_state):
-    """
-    Exact local loss of one merged cluster against the baseline angles.
-    This is the key improvement: repeated non-disjoint merges are not
-    summed one-by-one anymore; the whole cluster is recomputed at once.
-    """
     loss = 0.0
-    baseline_ops = merge_state["baseline_ops"]
+    baseline_support = merge_state["baseline_support"]
     prob_cache = merge_state["prob_cache"]
 
     for pattern, theta_orig in source_map.items():
-        p = _probability_weight(pattern, baseline_ops, prob_cache)
+        p = _probability_weight(pattern, baseline_support, prob_cache)
         loss += (1.0 - np.cos((theta_orig - new_theta) / 2.0)) * p
 
     return loss
 
 
 def _optimal_cluster_angle(source_map, merge_state):
-    """
-    Choose the common merged angle that maximizes the estimated overlap
-    inside the cluster. This is especially important for merges with an
-    imaginary zero.
-    """
     x = 0.0
     y = 0.0
-    baseline_ops = merge_state["baseline_ops"]
+    baseline_support = merge_state["baseline_support"]
     prob_cache = merge_state["prob_cache"]
 
     for pattern, theta_orig in source_map.items():
-        p = _probability_weight(pattern, baseline_ops, prob_cache)
+        p = _probability_weight(pattern, baseline_support, prob_cache)
         x += p * np.cos(theta_orig / 2.0)
         y += p * np.sin(theta_orig / 2.0)
 
