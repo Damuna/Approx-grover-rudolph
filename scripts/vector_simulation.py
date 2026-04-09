@@ -32,7 +32,7 @@ M = 10
 repeat = 20
 n_points = 10
 vec_type = "real"
-n_qubit = 5
+n_qubit = 6
 d_values = [10]
 min_overlap_values = np.linspace(0.5, 1, num=n_points)
 
@@ -59,7 +59,6 @@ def compute_values(n_qubits: int, sparsity: int, min_overlap: float):
     angles_phases_copy = copy.deepcopy(angles_phases)
 
     angle_phases_zero = optimize_full_dict(angles_phases_copy)
-    psi_zero = GR_circuit(angles_phases_copy)
 
     overlap_estimate, total_merges, zero_merges = ordering_geometric_series(
         angles_phases, min_overlap, M
@@ -68,7 +67,7 @@ def compute_values(n_qubits: int, sparsity: int, min_overlap: float):
     psi_approx = GR_circuit(angles_phases)
 
     psi_dense = psi.toarray().flatten()[: len(psi_approx)]
-    actual_overlap = abs(np.real(psi_dense.conj() @ psi_zero))
+    actual_overlap = abs(np.real(psi_dense.conj() @ psi_approx))
 
     return (
         f"{min_overlap}\t{sparsity}\t{overlap_estimate}\t"
