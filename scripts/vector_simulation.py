@@ -25,13 +25,15 @@ matplotlib.rcParams.update({"font.size": 15})
 line_colors = ["#2D2F92", "#DC3977", "#FBB982", "#39737C", "#7DC36D"]
 
 # ── Parameters ──
-M = 10
+M = 20
 repeat = 20
 n_points = 10
 vec_type = "real"
-n_qubit = 10
-d_values = [5, 10, 50, 100]
-min_overlap_values = np.linspace(0.5, 1, num=n_points)
+n_qubit = 15
+D_values = [ 1e-4, 5e-4, 1e-3, 5e-3 ] # 15 qubits
+#D_values = [ 1e-5, 5e-4, 1e-4, 5e-4 ] # 20 qubits
+d_values = [ int(D * 2**n_qubit) for D in D_values ]
+min_overlap_values = np.linspace(0.75, 1, num=n_points)
 
 # ── Folders ──
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +42,7 @@ data_folder.mkdir(parents=True, exist_ok=True)
 plot_folder = ROOT / "plots"
 plot_folder.mkdir(parents=True, exist_ok=True)
 
-N_PROCESSES = 8
+N_PROCESSES = 1
 FILEPATH = data_folder / f"ordering_alg_n_{n_qubit}_vector.npy"
 
 
@@ -127,6 +129,26 @@ def plot():
 
     min_overlap, d, overlap_estimate, actual_overlap, _, _ = _load_data()
 
+    SMALL_SIZE = 19
+    MEDIUM_SIZE = 21
+    BIGGER_SIZE = 23
+    params = {
+            "ytick.color" : "black",
+            "xtick.color" : "black",
+            "axes.labelcolor" : "black",
+            "axes.edgecolor" : "black",
+            "text.usetex" : True,
+            "font.family" : "serif",
+            "font.serif" : ["Computer Modern Serif"],
+            "font.size" : SMALL_SIZE,
+            "axes.titlesize" : SMALL_SIZE,
+            "axes.labelsize" : MEDIUM_SIZE,
+            "xtick.labelsize" : SMALL_SIZE,
+            "ytick.labelsize" : SMALL_SIZE,
+            "legend.fontsize" : SMALL_SIZE,
+            #"figure.titlesize" : BIGGER_SIZE,
+            }
+    plt.rcParams.update(params)
     plt.figure(figsize=(7, 6))
     ax = plt.gca()
 
@@ -143,19 +165,18 @@ def plot():
         stds_oe = [np.std(oe[x == ux]) for ux in unique_x]
 
         color = line_colors[i % len(line_colors)]
+        D_formatted = '{:.0e}'.format(D_values[i])
         ax.errorbar(unique_x, means_ao, yerr=stds_ao,
-                    label=f"d = {fixed_d} (actual)", color=color)
+                    label=f"D = {D_formatted}", color=color, fmt="--")
         ax.errorbar(unique_x, means_oe, yerr=stds_oe,
-                    fmt="o", color=color, alpha=0.3,
-                    label=f"d = {fixed_d} (estimate)")
+                    fmt="o", color=color, alpha=0.5)
 
-    ax.set_xlabel("Min Overlap allowed")
-    ax.set_ylabel("Overlap")
+    ax.set_xlabel("minimum allowed overlap")
+    ax.set_ylabel("overlap")
     ax.set_facecolor("#F9F9FB")
-    ax.legend()
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.3), ncol=2, fancybox=True, shadow=True)
     ax.grid()
-    plt.tight_layout()
-    plt.savefig(plot_folder / f"ordering_n_{n_qubit}_vector_single.pdf")
+    plt.savefig(plot_folder / f"ordering_n_{n_qubit}_vector_single.pdf", dpi=600, bbox_inches='tight')
     plt.show()
     plt.close()
 

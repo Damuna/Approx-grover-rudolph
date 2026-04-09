@@ -32,9 +32,10 @@ M = 20
 repeat = 20
 n_points = 5
 vec_type = "real"
-n_qubit = 15
-d_values = [10, 50, 100]
-min_overlap_values = np.linspace(0.8, 1, num=n_points)
+n_qubit = 20
+D_values = [ 1e-5, 5e-5, 1e-4, 5e-4, 1e-3 ] # 20 qubits
+d_values = [ int(D * 2**n_qubit) for D in D_values ]
+min_overlap_values = np.linspace(0.75, 1, num=n_points)
 
 # ── Folders ──
 ROOT = Path(__file__).resolve().parents[1]
@@ -127,7 +128,27 @@ def plot():
     ratio_eps_zero = num_gates_approx / num_gates_eps_zero
 
     def _grouped_errorbar(y_values, ylabel, filename):
-        plt.figure(figsize=(10, 7))
+        SMALL_SIZE = 19
+        MEDIUM_SIZE = 21
+        BIGGER_SIZE = 23
+        params = {
+                "ytick.color" : "black",
+                "xtick.color" : "black",
+                "axes.labelcolor" : "black",
+                "axes.edgecolor" : "black",
+                "text.usetex" : True,
+                "font.family" : "serif",
+                "font.serif" : ["Computer Modern Serif"],
+                "font.size" : SMALL_SIZE,
+                "axes.titlesize" : SMALL_SIZE,
+                "axes.labelsize" : MEDIUM_SIZE,
+                "xtick.labelsize" : SMALL_SIZE,
+                "ytick.labelsize" : SMALL_SIZE,
+                "legend.fontsize" : SMALL_SIZE,
+                #"figure.titlesize" : BIGGER_SIZE,
+                }
+        plt.rcParams.update(params)
+        plt.figure(figsize=(7, 6))
         for i, fixed_d in enumerate(d_values):
             mask = np.isclose(d, fixed_d)
             x = min_overlap[mask]
@@ -136,26 +157,29 @@ def plot():
             means = [np.mean(y[x == ux]) for ux in unique_x]
             stds = [np.std(y[x == ux]) for ux in unique_x]
             color = line_colors[i % len(line_colors)]
+            D_formatted = '{:.0e}'.format(D_values[i])
             plt.errorbar(unique_x, means, yerr=stds,
-                         label=f"d = {fixed_d}", color=color)
-        plt.xlabel("Min overlap allowed")
+                         label=f"D = {D_formatted}", color=color, fmt="--")
+        plt.xlabel("minimum allowed overlap ")
         plt.ylabel(ylabel)
+        plt.yscale('log')
         plt.grid(True)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(plot_folder / filename)
+        ax = plt.gca()
+        ax.set_facecolor("#F9F9FB")
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.25), ncol=3, fancybox=True, shadow=True)
+        plt.savefig(plot_folder / filename, dpi=600, bbox_inches='tight')
         plt.show()
         plt.close()
         print(f"Plot saved: {plot_folder / filename}")
 
     _grouped_errorbar(
         ratio_uniform,
-        "CNOTs Approx / CNOTs Uniform",
+        '$N_{\\mathrm{CNOT,approx}}$ / $N_{\\mathrm{CNOT,uniform}}$',
         f"ratio_uniform_n_{n_qubit}.pdf",
     )
     _grouped_errorbar(
         ratio_eps_zero,
-        "CNOTs Approx / CNOTs ε=0",
+        '$N_{\\mathrm{CNOT,approx}}$ / $N_{\\mathrm{CNOT}, exact}$',
         f"ratio_eps_zero_n_{n_qubit}.pdf",
     )
 
