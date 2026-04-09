@@ -21,6 +21,9 @@ from approx_grover_rudolph import (
     optimize_full_dict,
     ordering_geometric_series,
     hybrid_CNOT_count,
+    single_rotation_count,
+    optimize_full_dict_support_aware_exact,
+    GR_circuit
 )
 
 print = functools.partial(print, flush=True)
@@ -28,7 +31,7 @@ matplotlib.rcParams.update({"font.size": 15})
 line_colors = ["#2D2F92", "#DC3977", "#FBB982", "#39737C", "#7DC36D"]
 
 # ── Parameters ──
-M = 20
+M = 100
 repeat = 20
 n_points = 5
 vec_type = "real"
@@ -54,20 +57,104 @@ def compute_values(min_overlap: float, n_qubits: int, sparsity: int):
 
     angles_phases = build_dictionary(psi)
     angles_phases_copy = copy.deepcopy(angles_phases)
+    angles_phases_copy_copy = copy.deepcopy(angles_phases)
 
     # eps=0 optimisation
-    angle_phases_zero = optimize_full_dict(angles_phases_copy)
-    num_gates_eps_zero = hybrid_CNOT_count(angle_phases_zero)
+    angles_phases_zero = optimize_full_dict_support_aware_exact(angles_phases_copy)
+    num_gates_eps_zero = hybrid_CNOT_count(angles_phases_zero)
     num_gates_uniform = (2**n_qubits) - 1
 
+    # Check errors
+    # psi_zero = GR_circuit(angles_phases_zero)
+    # psi_dense = psi.toarray().flatten()[: len(psi_zero)]
+    # actual_overlap = abs(np.real(psi_dense.conj() @ psi_zero))
+
     # approximate ordering
-    ordering_geometric_series(angles_phases, min_overlap, M)
-    num_gates_approx = hybrid_CNOT_count(angles_phases)
+    overlap_estimate, total_merges, zero_merges = ordering_geometric_series(angles_phases_zero, min_overlap, M, baseline_gate_operations=angles_phases_copy_copy)
+    num_gates_approx = hybrid_CNOT_count(angles_phases_zero)
+
+    # if abs(actual_overlap - 1) > 1e-6:
+    #     print_dict_comprehensible(angles_phases_copy_copy, 'ORIGINAL')
+    #     print_dict_comprehensible(angles_phases, 'APPROX DICT')
+    #     print_dict_comprehensible(angle_phases_zero, 'ZERO DICT')
+    #     compare_dicts(angle_phases_zero, angles_phases)
 
     return (
         f"{min_overlap}\t{sparsity}\t{num_gates_approx}\t"
         f"{num_gates_uniform}\t{num_gates_eps_zero}\n"
     )
+
+def print_dict_comprehensible(dictionary, title=""):
+    """Print dictionary in a readable format"""
+    if title:
+        print(f"\n{title}")
+        print("=" * 50)
+    
+    for i, layer in enumerate(dictionary):
+        print(f"\nLayer {i}:")
+        for key, (angle, phase) in layer.items():
+            key_str = f"'{key}'" if key else "''"
+            print(f"  {key_str:5} -> angle: {angle:.3f}")
+
+def compare_dicts(zero_dict, approx_dict):
+    """Compare two dictionaries and print differences"""
+    print("\n" + "="*60)
+    print("DIFFERENCES BETWEEN ZERO AND APPROX DICTIONARIES")
+    print("="*60)
+    
+    # Compare layer by layer
+    max_layers = max(len(zero_dict), len(approx_dict))
+    
+    for layer_idx in range(max_layers):
+        zero_layer = zero_dict[layer_idx] if layer_idx < len(zero_dict) else {}
+        approx_layer = approx_dict[layer_idx] if layer_idx < len(approx_dict) else {}
+        
+        zero_keys = set(zero_layer.keys())
+        approx_keys = set(approx_layer.keys())
+        
+        # Keys only in zero dict
+        only_zero = zero_keys - approx_keys
+        if only_zero:
+            print(f"\nLayer {layer_idx} - Keys only in ZERO dict:")
+            for key in only_zero:
+                angle, phase = zero_layer[key]
+                key_str = f"'{key}'" if key else "''"
+                print(f"  {key_str:5} -> angle: {angle:.3f}")
+        
+        # Keys only in approx dict
+        only_approx = approx_keys - zero_keys
+        if only_approx:
+            print(f"\nLayer {layer_idx} - Keys only in APPROX dict:")
+            for key in only_approx:
+                angle, phase = approx_layer[key]
+                key_str = f"'{key}'" if key else "''"
+                print(f"  {key_str:5} -> angle: {angle:.3f}")
+        
+        # Keys in both but with different values
+        common_keys = zero_keys & approx_keys
+        differences = []
+        for key in common_keys:
+            zero_angle, zero_phase = zero_layer[key]
+            approx_angle, approx_phase = approx_layer[key]
+            
+            # Check if values differ (with tolerance for floating point)
+            angle_diff = abs(zero_angle - approx_angle)
+            phase_diff = abs(zero_phase - approx_phase)
+            
+            if angle_diff > 1e-9 or phase_diff > 1e-9:
+                differences.append((key, zero_angle, zero_phase, approx_angle, approx_phase, angle_diff, phase_diff))
+        
+        if differences:
+            print(f"\nLayer {layer_idx} - Keys with DIFFERENT values:")
+            for key, z_ang, z_ph, a_ang, a_ph, ang_diff, ph_diff in differences:
+                key_str = f"'{key}'" if key else "''"
+                print(f"  {key_str:5}:")
+                print(f"      ZERO:   angle={z_ang:.3f}")
+                print(f"      APPROX: angle={a_ang:.3f}")
+                print(f"      DIFF:   angle={ang_diff:.6e}, phase={ph_diff:.6e}")
+        
+        if not only_zero and not only_approx and not differences:
+            print(f"\nLayer {layer_idx} - No differences found")
 
 
 def _output_progress(results, total):

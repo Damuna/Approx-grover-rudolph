@@ -173,3 +173,68 @@ def generate_strings(s):
         result.append("".join(s_list))
 
     return result
+
+
+def _branch_has_no_support(pattern, baseline_support, tol=1e-15):
+    """
+    True iff no nonzero leaf of the exact baseline circuit has a prefix
+    compatible with 'pattern'.
+    """
+    k = len(pattern)
+    for leaf, prob in baseline_support:
+        if prob > tol and _pattern_matches(pattern, leaf[:k]):
+            return False
+    return True
+
+    
+def _pattern_matches(pattern, bit_string):
+    return all(p == "e" or p == b for p, b in zip(pattern, bit_string))
+
+
+def _build_baseline_support(baseline_ops, tol=1e-15):
+    """
+    Build the nonzero leaves of the baseline circuit together with their
+    probabilities. For a d-sparse target state, this list has size O(d).
+    """
+    n_layers = len(baseline_ops)
+    support = []
+
+    def dfs(prefix, prob):
+        depth = len(prefix)
+        if depth == n_layers:
+            if prob > tol:
+                support.append((prefix, prob))
+            return
+
+        theta = _matching_value(prefix, baseline_ops[depth])[0]
+
+        p0 = prob * f_cs(theta, "0")
+        if p0 > tol:
+            dfs(prefix + "0", p0)
+
+        p1 = prob * f_cs(theta, "1")
+        if p1 > tol:
+            dfs(prefix + "1", p1)
+
+    dfs("", 1.0)
+    return support
+
+
+def _matching_value(prefix, angles_phases_dict):
+    """
+    Return the most specific gate in angles_phases_dict matching the concrete prefix.
+    Needed because the dictionaries can contain keys with 'e'.
+    """
+    best_value = None
+    best_specificity = -1
+
+    for pattern, value in angles_phases_dict.items():
+        if len(pattern) != len(prefix):
+            continue
+        if _pattern_matches(pattern, prefix):
+            specificity = sum(ch != "e" for ch in pattern)
+            if specificity > best_specificity:
+                best_specificity = specificity
+                best_value = value
+
+    return best_value if best_value is not None else (0.0, 0.0)

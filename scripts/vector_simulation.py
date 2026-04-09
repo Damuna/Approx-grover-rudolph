@@ -1,5 +1,6 @@
 """
 Approximate simulation with explicit overlap via GR_circuit.
+Includes overlap plots and gate count ratio plots.
 """
 
 from pathlib import Path
@@ -17,7 +18,9 @@ from approx_grover_rudolph import (
     optimize_full_dict,
     ordering_geometric_series,
     gate_count,
+    hybrid_CNOT_count,
     GR_circuit,
+    optimize_full_dict_support_aware_exact
 )
 
 print = functools.partial(print, flush=True)
@@ -44,6 +47,7 @@ plot_folder.mkdir(parents=True, exist_ok=True)
 
 N_PROCESSES = 1
 FILEPATH = data_folder / f"ordering_alg_n_{n_qubit}_vector.npy"
+RATIO_FILEPATH = data_folder / f"ratios_n_{n_qubit}.npy"
 
 
 def compute_values(n_qubits: int, sparsity: int, min_overlap: float):
@@ -73,6 +77,28 @@ def compute_values(n_qubits: int, sparsity: int, min_overlap: float):
     )
 
 
+def compute_ratio_values(min_overlap: float, n_qubits: int, sparsity: int):
+    """Return npy line: min_overlap  d  num_gates_approx  num_gates_uniform  num_gates_eps_zero"""
+    psi = generate_sparse_unit_vector(n_qubits, sparsity, vector_type=vec_type)
+
+    angles_phases = build_dictionary(psi)
+    angles_phases_copy = copy.deepcopy(angles_phases)
+
+    # eps=0 optimisation
+    angle_phases_zero = optimize_full_dict_support_aware_exact(angles_phases_copy)
+    num_gates_eps_zero = hybrid_CNOT_count(angle_phases_zero)
+    num_gates_uniform = (2**n_qubits) - 1
+
+    # approximate ordering
+    ordering_geometric_series(angles_phases, min_overlap, M)
+    num_gates_approx = hybrid_CNOT_count(angles_phases)
+
+    return (
+        f"{min_overlap}\t{sparsity}\t{num_gates_approx}\t"
+        f"{num_gates_uniform}\t{num_gates_eps_zero}\n"
+    )
+
+
 def _output_progress(results, total):
     n_completed, n_percent_old = 0, 0
     while n_completed < total:
@@ -96,23 +122,47 @@ def collect():
     expected = repeat * len(min_overlap_values) * len(d_values)
     if not _file_needs_update(FILEPATH, expected):
         print(f"Data file already complete: {FILEPATH}")
+    else:
+        print("──────── Collecting: Overlap (vector) ────────")
+        results = []
+        with mp.Pool(N_PROCESSES) as pool:
+            for _ in range(repeat):
+                for min_ov in min_overlap_values:
+                    for d in d_values:
+                        results.append(
+                            pool.apply_async(compute_values, (n_qubit, d, min_ov))
+                        )
+            pool.close()
+            _output_progress(results, expected)
+            pool.join()
+
+        print("Writing results …")
+        with open(FILEPATH, "w") as f:
+            for r in results:
+                f.write(r.get())
+        print()
+
+
+def collect_ratios():
+    expected = repeat * len(min_overlap_values) * len(d_values)
+    if not _file_needs_update(RATIO_FILEPATH, expected):
+        print(f"Ratio data file already complete: {RATIO_FILEPATH}")
         return
 
-    print("──────── Collecting: Overlap (vector) ────────")
+    print("──────── Collecting: Ratios ────────")
     results = []
     with mp.Pool(N_PROCESSES) as pool:
         for _ in range(repeat):
             for min_ov in min_overlap_values:
                 for d in d_values:
-                    results.append(
-                        pool.apply_async(compute_values, (n_qubit, d, min_ov))
-                    )
+                    r = pool.apply_async(compute_ratio_values, (min_ov, n_qubit, d))
+                    results.append(r)
         pool.close()
         _output_progress(results, expected)
         pool.join()
 
     print("Writing results …")
-    with open(FILEPATH, "w") as f:
+    with open(RATIO_FILEPATH, "w") as f:
         for r in results:
             f.write(r.get())
     print()
@@ -120,6 +170,10 @@ def collect():
 
 def _load_data():
     return np.loadtxt(FILEPATH, unpack=True)
+
+
+def _load_ratio_data():
+    return np.loadtxt(RATIO_FILEPATH, unpack=True)
 
 
 def plot():
@@ -227,100 +281,56 @@ def plot_overlap_difference():
     print(f"Overlap difference plot saved: {outpath}")
 
 
-def plot_cross_term():
-    if not FILEPATH.exists():
-        print(f"No data file found: {FILEPATH}")
+def plot_ratios():
+    """Plot CNOT count ratios: approx/uniform and approx/eps=0"""
+    if not RATIO_FILEPATH.exists():
+        print(f"No ratio data file found: {RATIO_FILEPATH}")
         return
 
-    min_ov, d_arr, overlap_estimate, actual_overlap, _, _ = _load_data()
+    (
+        min_overlap, d, num_gates_approx, num_gates_uniform, num_gates_eps_zero,
+    ) = _load_ratio_data()
 
-    sum_delta = 1.0 - overlap_estimate
-    cross_term = overlap_estimate - actual_overlap
-    ratio = cross_term / np.where(np.abs(sum_delta) > 1e-12, sum_delta, np.nan)
+    ratio_uniform = num_gates_approx / num_gates_uniform
+    ratio_eps_zero = num_gates_approx / num_gates_eps_zero
 
-    plt.figure(figsize=(7, 6))
-    ax = plt.gca()
+    def _grouped_errorbar(y_values, ylabel, filename):
+        plt.figure(figsize=(10, 7))
+        for i, fixed_d in enumerate(d_values):
+            mask = np.isclose(d, fixed_d)
+            x = min_overlap[mask]
+            y = y_values[mask]
+            unique_x = np.unique(x)
+            means = [np.mean(y[x == ux]) for ux in unique_x]
+            stds = [np.std(y[x == ux]) for ux in unique_x]
+            color = line_colors[i % len(line_colors)]
+            plt.errorbar(unique_x, means, yerr=stds,
+                         label=f"d = {fixed_d}", color=color)
+        plt.xlabel("Min overlap allowed")
+        plt.ylabel(ylabel)
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(plot_folder / filename)
+        plt.show()
+        plt.close()
+        print(f"Plot saved: {plot_folder / filename}")
 
-    for i, fixed_d in enumerate(d_values):
-        mask = np.isclose(d_arr, fixed_d)
-        if not np.any(mask):
-            continue
-        color = line_colors[i % len(line_colors)]
-        ax.scatter(sum_delta[mask], ratio[mask],
-                   color=color, alpha=0.4, s=20, label=f"$d = {fixed_d}$")
-
-    ax.axhline(y=0.1, color="gray", ls="--", alpha=0.6, label="0.1 threshold")
-    ax.axhline(y=-0.1, color="gray", ls="--", alpha=0.6)
-    ax.set_xlabel(r"$\sum_i \Delta_i$")
-    ax.set_ylabel(r"$\mathrm{cross\;term}\;/\;\sum_i \Delta_i$")
-    ax.set_facecolor("#F9F9FB")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    outpath = plot_folder / f"cross_term_ratio_n_{n_qubit}.pdf"
-    plt.savefig(outpath)
-    plt.show()
-    plt.close()
-    print(f"Cross-term plot saved: {outpath}")
-
-
-def plot_merge_counts():
-    """
-    Plot total number of mergings (solid) and mergings-with-zero (dashed)
-    vs min_overlap, one curve per d value.
-    """
-    if not FILEPATH.exists():
-        print(f"No data file found: {FILEPATH}")
-        return
-
-    min_ov, d_arr, _, _, total_merges, zero_merges = _load_data()
-
-    plt.figure(figsize=(7, 6))
-    ax = plt.gca()
-
-    for i, fixed_d in enumerate(d_values):
-        mask = np.isclose(d_arr, fixed_d)
-        x = min_ov[mask]
-        tm = total_merges[mask]
-        zm = zero_merges[mask]
-
-        unique_x = np.unique(x)
-        means_tm = np.array([np.mean(tm[x == ux]) for ux in unique_x])
-        stds_tm  = np.array([np.std(tm[x == ux])  for ux in unique_x])
-        means_zm = np.array([np.mean(zm[x == ux]) for ux in unique_x])
-        stds_zm  = np.array([np.std(zm[x == ux])  for ux in unique_x])
-
-        color = line_colors[i % len(line_colors)]
-
-        # total mergings – solid line
-        ax.errorbar(
-            unique_x, means_tm, yerr=stds_tm,
-            color=color, ls="-", marker="s", markersize=4,
-            label=f"d = {fixed_d} (total)",
-        )
-        # mergings with 0 – dashed line
-        ax.errorbar(
-            unique_x, means_zm, yerr=stds_zm,
-            color=color, ls="--", marker="o", markersize=4, alpha=0.6,
-            label=f"d = {fixed_d} (with 0)",
-        )
-
-    ax.set_xlabel("Min Overlap allowed")
-    ax.set_ylabel("Number of mergings")
-    ax.set_facecolor("#F9F9FB")
-    ax.legend(fontsize=10, ncol=2)
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    outpath = plot_folder / f"merge_counts_n_{n_qubit}.pdf"
-    plt.savefig(outpath)
-    plt.show()
-    plt.close()
-    print(f"Merge counts plot saved: {outpath}")
+    _grouped_errorbar(
+        ratio_uniform,
+        "CNOTs Approx / CNOTs Uniform",
+        f"ratio_uniform_n_{n_qubit}.pdf",
+    )
+    _grouped_errorbar(
+        ratio_eps_zero,
+        "CNOTs Approx / CNOTs ε=0",
+        f"ratio_eps_zero_n_{n_qubit}.pdf",
+    )
 
 
 if __name__ == "__main__":
     collect()
+    collect_ratios()
     plot()
     plot_overlap_difference()
-    plot_cross_term()
-    plot_merge_counts()
+    plot_ratios()

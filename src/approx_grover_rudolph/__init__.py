@@ -31,3 +31,7 @@ from .gate_count import (
     hybrid_CNOT_count,
     single_rotation_count,
 )
+
+from .exact_optimization import (
+    optimize_full_dict_support_aware_exact
+    )
