@@ -15,6 +15,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
 
+
 from approx_grover_rudolph import (
     generate_sparse_unit_vector,
     build_dictionary,
@@ -36,8 +37,8 @@ repeat = 20
 n_points = 5
 vec_type = "real"
 n_qubit = 20
-D_values = [ 1e-5, 5e-5, 1e-4, 5e-4, 1e-3 ] # 20 qubits
-d_values = [ int(D * 2**n_qubit) for D in D_values ]
+d_values = [10,50]
+D_values = d_values
 min_overlap_values = np.linspace(0.75, 1, num=n_points)
 
 # ── Folders ──
@@ -47,7 +48,7 @@ data_folder.mkdir(parents=True, exist_ok=True)
 plot_folder = ROOT / "plots"
 plot_folder.mkdir(parents=True, exist_ok=True)
 
-N_PROCESSES = 8
+N_PROCESSES = 2
 FILEPATH = data_folder / f"ratios_n_{n_qubit}.npy"
 
 
@@ -179,9 +180,9 @@ def _file_needs_update(filepath, expected_lines):
 
 def collect():
     expected = repeat * len(min_overlap_values) * len(d_values)
-    if not _file_needs_update(FILEPATH, expected):
-        print(f"Data file already complete: {FILEPATH}")
-        return
+    # if not _file_needs_update(FILEPATH, expected):
+    #     print(f"Data file already complete: {FILEPATH}")
+    #     return
 
     print("──────── Collecting: Ratios ────────")
     results = []

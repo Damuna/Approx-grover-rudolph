@@ -72,34 +72,44 @@ def _merge_identical_neighbours_once(gate_operations, tol=1e-12):
 
     return False
 
-
-def optimize_dict_support_aware_exact(
-    gate_operations: ControlledRotationGateMap,
-    baseline_support,
-    tol: float = 1e-12,
-) -> ControlledRotationGateMap:
-    """
-    Exact optimization using:
-      1. standard identical-neighbour merges
-      2. support-aware control removal on unreachable branches
-
-    This preserves the prepared state exactly.
-    """
+def strip_zero_support_controls_maximally(key, baseline_support):
     changed = True
     while changed:
         changed = False
+        for pos, ch in enumerate(key):
+            if ch == "e":
+                continue
 
-        # First try the standard exact merge.
-        if _merge_identical_neighbours_once(gate_operations, tol=tol):
-            changed = True
-            continue
+            flipped = "1" if ch == "0" else "0"
+            partner = key[:pos] + flipped + key[pos + 1 :]
 
-        # Then try support-aware exact control removal.
-        if _drop_unreachable_control_once(
-            gate_operations, baseline_support, tol=tol
-        ):
-            changed = True
-            continue
+            if _branch_has_no_support(partner, baseline_support):
+                key = key[:pos] + "e" + key[pos + 1 :]
+                changed = True
+                break
+
+    return key
+
+
+def optimize_dict_support_aware_exact(gate_operations, baseline_support, tol=1e-12):
+    # Step 1: strip every gate maximally once
+    stripped = {}
+    for key, value in list(gate_operations.items()):
+        new_key = strip_zero_support_controls_maximally(key, baseline_support)
+
+        existing = stripped.get(new_key)
+        if existing is not None and not _same_gate(existing, value, tol):
+            raise ValueError(
+                f"Collision on key {new_key} with different gate values."
+            )
+        stripped[new_key] = value
+
+    gate_operations.clear()
+    gate_operations.update(stripped)
+
+    # Step 2: now only exact neighbour merges need saturation
+    while _merge_identical_neighbours_once(gate_operations, tol=tol):
+        pass
 
     return gate_operations
 
