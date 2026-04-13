@@ -238,3 +238,94 @@ def _matching_value(prefix, angles_phases_dict):
                 best_value = value
 
     return best_value if best_value is not None else (0.0, 0.0)
+
+
+def _matching_value(prefix, layer_dict):
+    """
+    Return the most specific gate in layer_dict matching the concrete prefix.
+    If nothing matches, return the trivial zero-angle gate.
+    """
+    best_value = None
+    best_specificity = -1
+
+    for pattern, value in layer_dict.items():
+        if len(pattern) != len(prefix):
+            continue
+        if not _pattern_matches(pattern, prefix):
+            continue
+
+        specificity = sum(ch != "e" for ch in pattern)
+        if specificity > best_specificity:
+            best_specificity = specificity
+            best_value = value
+
+    return best_value if best_value is not None else (0.0, 0.0)
+
+
+def _supported_prefixes_from_baseline_support(baseline_support, tol=1e-15):
+    """
+    Build the set of all prefixes that lie on nonzero baseline leaves.
+    """
+    prefixes = {""}
+    for leaf, prob in baseline_support:
+        if prob <= tol:
+            continue
+        for j in range(len(leaf) + 1):
+            prefixes.add(leaf[:j])
+    return prefixes
+
+
+def _exact_overlap_from_prefix(prefix, n_layers, baseline_ops, active_ops, supported_prefixes, memo):
+    """
+    Exact overlap recursion restricted to the support trie of the baseline state.
+    """
+    if prefix in memo:
+        return memo[prefix]
+
+    # If the baseline has no support below this prefix, this branch contributes zero.
+    if prefix not in supported_prefixes:
+        memo[prefix] = 0.0
+        return 0.0
+
+    # Reached a full leaf of the preparation tree.
+    if len(prefix) == n_layers:
+        memo[prefix] = 1.0
+        return 1.0
+
+    theta_base = _matching_value(prefix, baseline_ops[len(prefix)])[0]
+    theta_active = _matching_value(prefix, active_ops[len(prefix)])[0]
+
+    c = np.cos(theta_base / 2.0) * np.cos(theta_active / 2.0)
+    s = np.sin(theta_base / 2.0) * np.sin(theta_active / 2.0)
+
+    value = (
+        c * _exact_overlap_from_prefix(
+            prefix + "0", n_layers, baseline_ops, active_ops, supported_prefixes, memo
+        )
+        + s * _exact_overlap_from_prefix(
+            prefix + "1", n_layers, baseline_ops, active_ops, supported_prefixes, memo
+        )
+    )
+
+    memo[prefix] = value
+    return value
+
+
+def exact_overlap_current_circuit(baseline_ops, active_ops, baseline_support=None):
+    """
+    Exact overlap <psi_baseline | psi_active> computed on the baseline support trie.
+    """
+    if baseline_support is None:
+        baseline_support = _build_baseline_support(baseline_ops)
+
+    supported_prefixes = _supported_prefixes_from_baseline_support(baseline_support)
+    n_layers = len(baseline_ops)
+
+    return _exact_overlap_from_prefix(
+        "",
+        n_layers,
+        baseline_ops,
+        active_ops,
+        supported_prefixes,
+        memo={},
+    )

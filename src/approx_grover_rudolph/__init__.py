@@ -25,6 +25,7 @@ from .grover_rudolph import (
     grover_rudolph,
     build_dictionary,
     GR_circuit,
+    GR_circuit_sparse
 )
 
 from .gate_count import (

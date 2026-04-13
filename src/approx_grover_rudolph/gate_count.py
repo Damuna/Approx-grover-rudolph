@@ -6,8 +6,55 @@ GateCounts = np.ndarray
 
 __all__=[
     "single_rotation_count",
-    "hybrid_CNOT_count"
+    "hybrid_CNOT_count",
+    "_single_gate_cnot_cost",
+    "_layer_single_cnot_cost",
+    "_candidate_cnot_gain_local"
     ]
+
+def _single_gate_cnot_cost(key: str) -> int:
+    n_controls = key.count("0") + key.count("1")
+
+    if n_controls == 0:
+        return 0
+    elif n_controls == 1:
+        return 2
+    else:
+        return 16 * n_controls - 24
+
+
+def _layer_single_cnot_cost(layer_dict: ControlledRotationGateMap) -> int:
+    return sum(_single_gate_cnot_cost(k) for k in layer_dict)
+
+
+def _candidate_cnot_gain_local(gate_operations, candidate, layer_single_costs=None):
+    """
+    Exact CNOT gain for the current hybrid_CNOT_count, computed from the
+    affected layer only.
+    """
+    k1 = candidate["k1"]
+    k2 = candidate["k2"]
+    new_key = candidate["new_key"]
+
+    layer_idx = len(k1)
+    layer_dict = gate_operations[layer_idx]
+
+    if layer_single_costs is None:
+        before_single = _layer_single_cnot_cost(layer_dict)
+    else:
+        before_single = layer_single_costs[layer_idx]
+
+    uniform_cost = 2 ** layer_idx
+
+    after_single = before_single - _single_gate_cnot_cost(k1)
+    if k2 is not None:
+        after_single -= _single_gate_cnot_cost(k2)
+    after_single += _single_gate_cnot_cost(new_key)
+
+    before_hybrid = min(before_single, uniform_cost)
+    after_hybrid = min(after_single, uniform_cost)
+
+    return before_hybrid - after_hybrid
 
 
 def single_rotation_count(

@@ -21,6 +21,7 @@ from approx_grover_rudolph import (
     optimize_full_dict,
     ordering_geometric_series,
     hybrid_CNOT_count,
+    optimize_full_dict_support_aware_exact
 )
 
 print = functools.partial(print, flush=True)
@@ -29,12 +30,13 @@ line_colors = ["#2D2F92", "#DC3977", "#FBB982", "#39737C", "#7DC36D"]
 
 # ── Parameters ──
 M = 20
-repeat = 20
+repeat = 5
 n_points = 5
 vec_type = "real"
-n_qubit = 4
-d_values = [10]
-min_overlap_values = np.linspace(0.8, 1, num=n_points)
+n_qubit = 18
+D_values = [1e-4, 5e-4, 1e-3]
+d_values = [int(D * 2**n_qubit) for D in D_values]
+min_overlap_values = np.linspace(0.75, 1, num=n_points)
 
 # ── Folders ──
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,24 +50,32 @@ FILEPATH = data_folder / f"ratios_n_{n_qubit}.npy"
 
 
 def compute_values(min_overlap: float, n_qubits: int, sparsity: int):
-    """Return npy line: min_overlap  d  num_gates_approx  num_gates_uniform  num_gates_eps_zero"""
     psi = generate_sparse_unit_vector(n_qubits, sparsity, vector_type=vec_type)
 
-    angles_phases = build_dictionary(psi)
-    angles_phases_copy = copy.deepcopy(angles_phases)
+    # Standard GR
+    baseline_angles = build_dictionary(psi)
 
-    # eps=0 optimisation
-    angle_phases_zero = optimize_full_dict(angles_phases_copy)
-    num_gates_eps_zero = hybrid_CNOT_count(angle_phases_zero)
+    # Exact merging
+    exact_angles = optimize_full_dict_support_aware_exact(
+        copy.deepcopy(baseline_angles)
+    )
+    num_gates_exact = hybrid_CNOT_count(exact_angles)
+
+    # Approx mergings
+    approx_angles = exact_angles
+    ordering_geometric_series(
+        approx_angles,
+        min_overlap,
+        M,
+        baseline_gate_operations=baseline_angles,
+    )
+    num_gates_approx = hybrid_CNOT_count(approx_angles)
+
     num_gates_uniform = (2**n_qubits) - 1
-
-    # approximate ordering
-    ordering_geometric_series(angles_phases, min_overlap, M)
-    num_gates_approx = hybrid_CNOT_count(angles_phases)
 
     return (
         f"{min_overlap}\t{sparsity}\t{num_gates_approx}\t"
-        f"{num_gates_uniform}\t{num_gates_eps_zero}\n"
+        f"{num_gates_uniform}\t{num_gates_exact}\n"
     )
 
 

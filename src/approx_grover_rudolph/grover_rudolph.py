@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.sparse as sp
 from functools import reduce
 
 from .helping_functions import (
@@ -20,6 +21,7 @@ __all__ = [
     "build_dictionary",
     "grover_rudolph",
     "GR_circuit",
+    "GR_circuit_sparse"
 ]
 
 GateCounts = np.ndarray
@@ -319,3 +321,116 @@ def GR_circuit(dict_list: list[ControlledRotationGateMap]) -> np.ndarray:
             psi = U @ psi
 
     return psi
+
+
+import numpy as np
+import scipy.sparse as sp
+
+
+def _pattern_matches_index(index: int, pattern: str, n_qubit: int) -> bool:
+    """
+    Check whether the first len(pattern) qubits of |index> match a control pattern.
+    Qubit 0 is the most significant bit, consistent with the kron ordering in GR_circuit.
+    """
+    for pos, ch in enumerate(pattern):
+        if ch == "e":
+            continue
+        bitpos = n_qubit - 1 - pos
+        bit = (index >> bitpos) & 1
+        if bit != int(ch):
+            return False
+    return True
+
+
+def GR_circuit_sparse(
+    dict_list: list[ControlledRotationGateMap],
+    *,
+    atol: float = 1e-15,
+    return_sparse: bool = False,
+):
+    """
+    Sparse simulation of GR_circuit for the real-vector case.
+
+    This version never builds a 2^n x 2^n unitary.
+    It updates only the amplitudes currently present in the state.
+
+    Assumptions:
+      - target state is real, so nontrivial complex phases are not allowed
+      - phase is either None or equivalent to a real sign (0 or pi mod 2pi)
+
+    Args:
+        dict_list:
+            list of controlled-rotation dictionaries, one per target qubit
+        atol:
+            threshold below which amplitudes are dropped
+        return_sparse:
+            if True, return a scipy CSR row vector of shape (1, 2**n);
+            otherwise return a dense 1D numpy array
+
+    Returns:
+        State vector after applying the circuit, either sparse or dense.
+    """
+    n_qubit = len(dict_list)
+
+    # sparse state as {basis_index: amplitude}
+    psi: dict[int, float] = {0: 1.0}
+
+    for i, gates in enumerate(dict_list):
+        target_bitpos = n_qubit - 1 - i  # qubit i in kron ordering
+
+        for pattern, (theta, phase) in gates.items():
+            if theta is None and phase is None:
+                continue
+
+            c = 1.0 if theta is None else float(np.cos(theta / 2))
+            s = 0.0 if theta is None else float(np.sin(theta / 2))
+
+            if phase is None:
+                phase_factor = 1.0
+            else:
+                phase_factor = np.exp(1j * phase)
+                if abs(np.imag(phase_factor)) > atol:
+                    raise ValueError(
+                        "GR_circuit_sparse only supports the real-vector case. "
+                        "Found a genuinely complex phase."
+                    )
+                phase_factor = float(np.real_if_close(phase_factor))
+
+            # Apply this gate to all matching pairs (|...0...>, |...1...>)
+            # Use a snapshot so updates from this gate do not affect other pairs mid-sweep.
+            updates: dict[int, float] = {}
+
+            for idx0, amp0 in list(psi.items()):
+                # only process the '0' representative of each target pair
+                if ((idx0 >> target_bitpos) & 1) != 0:
+                    continue
+
+                if not _pattern_matches_index(idx0, pattern, n_qubit):
+                    continue
+
+                idx1 = idx0 | (1 << target_bitpos)
+                amp1 = psi.get(idx1, 0.0)
+
+                # (P_phase @ R) acting on [amp0, amp1]
+                new0 = c * amp0 - s * amp1
+                new1 = phase_factor * (s * amp0 + c * amp1)
+
+                updates[idx0] = float(np.real_if_close(new0))
+                updates[idx1] = float(np.real_if_close(new1))
+
+            for idx, value in updates.items():
+                if abs(value) < atol:
+                    psi.pop(idx, None)
+                else:
+                    psi[idx] = value
+
+    cols = np.fromiter(psi.keys(), dtype=np.int64, count=len(psi))
+    data = np.fromiter(psi.values(), dtype=float, count=len(psi))
+
+    if return_sparse:
+        rows = np.zeros(len(data), dtype=np.int64)
+        return sp.csr_matrix((data, (rows, cols)), shape=(1, 2**n_qubit))
+
+    out = np.zeros(2**n_qubit, dtype=float)
+    out[cols] = data
+    return out
