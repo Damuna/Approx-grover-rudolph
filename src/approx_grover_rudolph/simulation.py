@@ -1,8 +1,8 @@
 """
 Approximate simulation.
 Generates two plots:
-  1. CNOTs Exact / CNOTs Uniform vs min overlap allowed
-  2. CNOTs Approx / CNOTs Exact  vs min overlap allowed
+  1. CNOTs Approx / CNOTs Uniform  vs  min overlap allowed
+  2. CNOTs Approx / CNOTs eps=0    vs  min overlap allowed
 Both with curves for different d values.
 """
 
@@ -18,7 +18,6 @@ import matplotlib
 from approx_grover_rudolph import (
     generate_sparse_unit_vector,
     build_dictionary,
-    optimize_full_dict,
     ordering_geometric_series,
     hybrid_CNOT_count,
     optimize_full_dict_support_aware_exact,
@@ -30,12 +29,12 @@ line_colors = ["#2D2F92", "#DC3977", "#FBB982", "#39737C", "#7DC36D"]
 
 # ── Parameters ──
 M = 20
-repeat = 10
+repeat = 5
 n_points = 5
 vec_type = "real"
-n_qubit = 20
-D_values = [1e-5, 5e-5, 1e-4, 5e-4]
-d_values = [max(1, int(D * 2**n_qubit)) for D in D_values]
+n_qubit = 18
+D_values = [1e-4, 5e-4, 1e-3]
+d_values = [int(D * 2**n_qubit) for D in D_values]
 min_overlap_values = np.linspace(0.75, 1, num=n_points)
 
 # ── Folders ──
@@ -62,14 +61,12 @@ def compute_values(min_overlap: float, n_qubits: int, sparsity: int):
     num_gates_exact = hybrid_CNOT_count(exact_angles)
 
     # Approx mergings
-    approx_angles = copy.deepcopy(exact_angles)
+    approx_angles = exact_angles
     ordering_geometric_series(
         approx_angles,
         min_overlap,
         M,
         baseline_gate_operations=baseline_angles,
-        use_rigorous_bound=False,
-        regional_merges=False,
     )
     num_gates_approx = hybrid_CNOT_count(approx_angles)
 
@@ -132,15 +129,11 @@ def plot():
         return
 
     (
-        min_overlap,
-        d,
-        num_gates_approx,
-        num_gates_uniform,
-        num_gates_exact,
+        min_overlap, d, num_gates_approx, num_gates_uniform, num_gates_eps_zero,
     ) = np.loadtxt(FILEPATH, unpack=True)
 
-    ratio_exact_uniform = num_gates_exact / num_gates_uniform
-    ratio_approx_exact = num_gates_approx / num_gates_exact
+    ratio_uniform = num_gates_approx / num_gates_uniform
+    ratio_eps_zero = num_gates_approx / num_gates_eps_zero
 
     def _grouped_errorbar(y_values, ylabel, filename):
         plt.figure(figsize=(10, 7))
@@ -152,13 +145,8 @@ def plot():
             means = [np.mean(y[x == ux]) for ux in unique_x]
             stds = [np.std(y[x == ux]) for ux in unique_x]
             color = line_colors[i % len(line_colors)]
-            plt.errorbar(
-                unique_x,
-                means,
-                yerr=stds,
-                label=f"d = {fixed_d}",
-                color=color,
-            )
+            plt.errorbar(unique_x, means, yerr=stds,
+                         label=f"d = {fixed_d}", color=color)
         plt.xlabel("Min overlap allowed")
         plt.ylabel(ylabel)
         plt.grid(True)
@@ -170,14 +158,14 @@ def plot():
         print(f"Plot saved: {plot_folder / filename}")
 
     _grouped_errorbar(
-        ratio_exact_uniform,
-        "CNOTs Exact / CNOTs Uniform",
-        f"ratio_uniform_exact_n_{n_qubit}.pdf",
+        ratio_uniform,
+        "CNOTs Approx / CNOTs Uniform",
+        f"ratio_uniform_n_{n_qubit}.pdf",
     )
     _grouped_errorbar(
-        ratio_approx_exact,
-        "CNOTs Approx / CNOTs Exact",
-        f"ratio_exact_approx_n_{n_qubit}.pdf",
+        ratio_eps_zero,
+        "CNOTs Approx / CNOTs ε=0",
+        f"ratio_eps_zero_n_{n_qubit}.pdf",
     )
 
 

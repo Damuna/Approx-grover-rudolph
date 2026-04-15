@@ -1,9 +1,6 @@
 """
 Approximate simulation with explicit overlap via GR_circuit.
-Includes three overlap measures:
-  1. True overlap (computed explicitly, dense)
-  2. Overlap estimate (cluster-based)
-  3. Rigorous lower bound
+Includes overlap plots and gate count ratio plots.
 """
 
 from pathlib import Path
@@ -20,7 +17,6 @@ from approx_grover_rudolph import (
     build_dictionary,
     ordering_geometric_series,
     hybrid_CNOT_count,
-    GR_circuit,
     GR_circuit_sparse,
     optimize_full_dict_support_aware_exact,
 )
@@ -31,16 +27,19 @@ line_colors = ["#2D2F92", "#DC3977", "#FBB982", "#39737C", "#7DC36D"]
 
 # ── Parameters ──
 M = 20
-repeat = 1
+repeat = 20
 n_points = 10
 vec_type = "real"
-n_qubit = 15
-
-D_values = [1e-4, 5e-4, 1e-3]
+n_qubit = 10
+D_values = [1e-4, 5e-4, 1e-3, 5e-3]
 d_values = [int(D * 2**n_qubit) for D in D_values]
 min_overlap_values = np.linspace(0.75, 1, num=n_points)
 
-# Overwrite cached data after logic changes.
+# Test Parameters
+repeat = 10
+n_qubit = 15
+D_values = [1e-4, 5e-4, 1e-3, 5e-3]
+d_values = [int(D * 2**n_qubit) for D in D_values]
 force = False
 
 # ── Folders ──
@@ -50,74 +49,42 @@ data_folder.mkdir(parents=True, exist_ok=True)
 plot_folder = ROOT / "plots"
 plot_folder.mkdir(parents=True, exist_ok=True)
 
-N_PROCESSES = 1
-FILEPATH = data_folder / f"overlap_comparison_n_{n_qubit}_vector.npy"
-
-def _nonempty_layers_repr(dict_list):
-    """
-    Return only the non-empty layers in a readable format.
-    """
-    out = []
-    for depth, layer in enumerate(dict_list):
-        if layer:
-            out.append(f"layer {depth}: {layer}")
-    return "\n".join(out)
+N_PROCESSES = 2
+FILEPATH = data_folder / f"ordering_alg_n_{n_qubit}_vector.npy"
 
 
 def compute_values(min_overlap: float, n_qubits: int, sparsity: int):
+    # Generate random vector
     psi = generate_sparse_unit_vector(n_qubits, sparsity, vector_type=vec_type)
 
+    # Standard GR
     baseline_angles = build_dictionary(psi, n_qubit)
 
+    # Exact merging
     exact_angles = optimize_full_dict_support_aware_exact(
         copy.deepcopy(baseline_angles)
     )
     num_gates_exact = hybrid_CNOT_count(exact_angles)
 
+    # Approx mergings
     approx_angles = copy.deepcopy(exact_angles)
-    overlap_estimate, rigorous_bound = ordering_geometric_series(
+    overlap_estimate = ordering_geometric_series(
         approx_angles,
         min_overlap,
-        M,
-        baseline_gate_operations=baseline_angles,
-        use_rigorous_bound=True,
-        regional_merges=False
+        M, baseline_gate_operations=baseline_angles,
     )
-
     num_gates_approx = hybrid_CNOT_count(approx_angles)
 
-
-    # Sparse overlap
-    psi_approx_sparse = GR_circuit_sparse(approx_angles, return_sparse=True)
-    actual_overlap = abs(psi.conj().multiply(psi_approx_sparse).sum())
-
-    if rigorous_bound is not None and rigorous_bound - actual_overlap > 1e-2:
-        print("=" * 120)
-        print(
-            f"LOWER BOUND VIOLATION | min_overlap={min_overlap:.6f}, d={sparsity}"
-        )
-        print(f"LOWER BOUND: {rigorous_bound}")
-        print(f"OVERLAP:     {actual_overlap}")
-        print(f"ESTIMATE:    {overlap_estimate}")
-
-        print("ORIGINAL STATE:", psi)
-        print("RESULTING STATE:", psi_approx_sparse)
-
-        print("\nORIGINAL DICT (non-empty layers)")
-        print(_nonempty_layers_repr(baseline_angles))
-
-        print("\nEXACT DICT (non-empty layers)")
-        print(_nonempty_layers_repr(exact_angles))
-
-        print("\nAPPROX DICT (non-empty layers)")
-        print(_nonempty_layers_repr(approx_angles))
-        print("=" * 120)
+    # Compute overlap
+    psi_approx = GR_circuit_sparse(approx_angles, return_sparse=True)
+    psi_ref = psi[:, : psi_approx.shape[1]]
+    actual_overlap = abs(psi_ref.conj().multiply(psi_approx).sum())
 
     num_gates_uniform = (2**n_qubits) - 1
 
     return (
         f"{min_overlap}\t{sparsity}\t{overlap_estimate}\t"
-        f"{rigorous_bound}\t{actual_overlap}\t{num_gates_approx}\t"
+        f"{actual_overlap}\t{num_gates_approx}\t"
         f"{num_gates_uniform}\t{num_gates_exact}\n"
     )
 
@@ -146,12 +113,13 @@ def collect(force_recollect=False):
 
     if not force_recollect and not _file_needs_update(FILEPATH, expected):
         print(f"Data file already complete: {FILEPATH}")
+        print("Use force_recollect=True to override and recollect data.")
         return
 
     if force_recollect:
         print(f"Force recollecting data (overwriting {FILEPATH})")
 
-    print("──────── Collecting: Overlap Comparison ────────")
+    print("──────── Collecting: Overlap (vector) ────────")
     results = []
     with mp.Pool(N_PROCESSES) as pool:
         for _ in range(repeat):
@@ -174,8 +142,10 @@ def collect(force_recollect=False):
 def _load_data():
     data = np.loadtxt(FILEPATH, unpack=True)
 
-    if data.shape[0] != 8:
-        raise ValueError(f"Expected 8 columns in {FILEPATH}, found {data.shape[0]}")
+    if data.shape[0] != 7:
+        raise ValueError(
+            f"Expected 7 columns in {FILEPATH}, found {data.shape[0]}"
+        )
 
     return data
 
@@ -188,8 +158,9 @@ def _set_plot_style():
         "xtick.color": "black",
         "axes.labelcolor": "black",
         "axes.edgecolor": "black",
-        "text.usetex": False,
+        "text.usetex": True,
         "font.family": "serif",
+        "font.serif": ["Computer Modern Serif"],
         "font.size": SMALL_SIZE,
         "axes.titlesize": SMALL_SIZE,
         "axes.labelsize": MEDIUM_SIZE,
@@ -200,7 +171,7 @@ def _set_plot_style():
     plt.rcParams.update(params)
 
 
-def plot_overlap_comparison():
+def plot():
     if not FILEPATH.exists():
         print(f"No data file found: {FILEPATH}")
         return
@@ -209,7 +180,6 @@ def plot_overlap_comparison():
         min_overlap,
         d,
         overlap_estimate,
-        rigorous_bound,
         actual_overlap,
         num_gates_approx,
         num_gates_uniform,
@@ -218,6 +188,9 @@ def plot_overlap_comparison():
 
     _set_plot_style()
 
+    # --------------------------------------------------
+    # Figure 1: actual overlap and estimated overlap
+    # --------------------------------------------------
     plt.figure(figsize=(7, 6))
     ax = plt.gca()
 
@@ -226,15 +199,12 @@ def plot_overlap_comparison():
         x = min_overlap[mask]
         ao = actual_overlap[mask]
         oe = overlap_estimate[mask]
-        rb = rigorous_bound[mask]
 
         unique_x = np.unique(x)
         means_ao = [np.mean(ao[x == ux]) for ux in unique_x]
         stds_ao = [np.std(ao[x == ux]) for ux in unique_x]
         means_oe = [np.mean(oe[x == ux]) for ux in unique_x]
         stds_oe = [np.std(oe[x == ux]) for ux in unique_x]
-        means_rb = [np.mean(rb[x == ux]) for ux in unique_x]
-        stds_rb = [np.std(rb[x == ux]) for ux in unique_x]
 
         color = line_colors[i % len(line_colors)]
         D_formatted = "{:.0e}".format(D_values[i])
@@ -243,33 +213,17 @@ def plot_overlap_comparison():
             unique_x,
             means_ao,
             yerr=stds_ao,
-            label=f"D = {D_formatted} (true)",
+            label=f"D = {D_formatted}",
             color=color,
-            fmt="-",
-            linewidth=2,
+            fmt="--",
         )
-
         ax.errorbar(
             unique_x,
             means_oe,
             yerr=stds_oe,
             fmt="o",
             color=color,
-            alpha=0.6,
-            markersize=6,
-            label=f"D = {D_formatted} (estimate)",
-        )
-
-        ax.errorbar(
-            unique_x,
-            means_rb,
-            yerr=stds_rb,
-            fmt="^",
-            color=color,
-            alpha=0.6,
-            linestyle="--",
-            markersize=5,
-            label=f"D = {D_formatted} (bound)",
+            alpha=0.5,
         )
 
     ax.set_xlabel("minimum allowed overlap")
@@ -277,126 +231,32 @@ def plot_overlap_comparison():
     ax.set_facecolor("#F9F9FB")
     ax.legend(
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.35),
+        bbox_to_anchor=(0.5, 1.3),
         ncol=2,
         fancybox=True,
         shadow=True,
     )
     ax.grid()
-
     plt.savefig(
-        plot_folder / f"overlap_comparison_n_{n_qubit}_vector.pdf",
+        plot_folder / f"ordering_n_{n_qubit}_vector_single.pdf",
         dpi=600,
         bbox_inches="tight",
     )
     plt.show()
     plt.close()
-    print("Overlap comparison plot saved")
 
-
-def plot_overlap_difference():
-    if not FILEPATH.exists():
-        print(f"No data file found: {FILEPATH}")
-        return
-
-    (
-        min_ov,
-        d_arr,
-        overlap_estimate,
-        rigorous_bound,
-        actual_overlap,
-        num_gates_approx,
-        num_gates_uniform,
-        num_gates_exact,
-    ) = _load_data()
-
-    diff_est = overlap_estimate - actual_overlap
-    diff_bound = rigorous_bound - actual_overlap
-
-    _set_plot_style()
+    # --------------------------------------------------
+    # Figure 2: ratio exact / uniform
+    # --------------------------------------------------
     plt.figure(figsize=(7, 6))
     ax = plt.gca()
 
-    for i, fixed_d in enumerate(d_values):
-        mask = np.isclose(d_arr, fixed_d)
-        x = min_ov[mask]
-        de = diff_est[mask]
-        db = diff_bound[mask]
-
-        unique_x = np.unique(x)
-        means_de = np.array([np.mean(de[x == ux]) for ux in unique_x])
-        stds_de = np.array([np.std(de[x == ux]) for ux in unique_x])
-        means_db = np.array([np.mean(db[x == ux]) for ux in unique_x])
-        stds_db = np.array([np.std(db[x == ux]) for ux in unique_x])
-
-        color = line_colors[i % len(line_colors)]
-        D_formatted = "{:.0e}".format(D_values[i])
-
-        ax.errorbar(
-            unique_x,
-            means_de,
-            yerr=stds_de,
-            color=color,
-            ls="-",
-            marker="o",
-            markersize=4,
-            label=f"D = {D_formatted} (estimate error)",
-        )
-
-        ax.errorbar(
-            unique_x,
-            means_db,
-            yerr=stds_db,
-            color=color,
-            ls="--",
-            marker="^",
-            markersize=4,
-            label=f"D = {D_formatted} (bound error)",
-        )
-
-    ax.axhline(y=0, color="gray", ls="--", alpha=0.6)
-    ax.set_xlabel("minimum allowed overlap")
-    ax.set_ylabel("overlap error")
-    ax.set_facecolor("#F9F9FB")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-
-    outpath = plot_folder / f"overlap_error_n_{n_qubit}.pdf"
-    plt.tight_layout()
-    plt.savefig(outpath, dpi=600, bbox_inches="tight")
-    plt.show()
-    plt.close()
-    print(f"Overlap error plot saved: {outpath}")
-
-
-def plot_gate_ratios():
-    if not FILEPATH.exists():
-        print(f"No data file found: {FILEPATH}")
-        return
-
-    (
-        min_overlap,
-        d,
-        overlap_estimate,
-        rigorous_bound,
-        actual_overlap,
-        num_gates_approx,
-        num_gates_uniform,
-        num_gates_exact,
-    ) = _load_data()
-
-    ratio_exact_uniform = num_gates_exact / num_gates_uniform
-    ratio_approx_exact = num_gates_approx / num_gates_exact
-
-    _set_plot_style()
-
-    plt.figure(figsize=(7, 6))
-    ax = plt.gca()
+    ratio_uniform_exact = num_gates_exact / num_gates_uniform
 
     for i, fixed_d in enumerate(d_values):
         mask = np.isclose(d, fixed_d)
         x = min_overlap[mask]
-        y = ratio_exact_uniform[mask]
+        y = ratio_uniform_exact[mask]
 
         unique_x = np.unique(x)
         means_y = np.array([np.mean(y[x == ux]) for ux in unique_x])
@@ -416,7 +276,7 @@ def plot_gate_ratios():
         )
 
     ax.set_xlabel("minimum allowed overlap")
-    ax.set_ylabel("CNOT_exact / CNOT_uniform")
+    ax.set_ylabel(r"$\mathrm{CNOT}_{\mathrm{exact}} / \mathrm{CNOT}_{\mathrm{uniform}}$")
     ax.set_facecolor("#F9F9FB")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -429,13 +289,18 @@ def plot_gate_ratios():
     plt.show()
     plt.close()
 
+    # --------------------------------------------------
+    # Figure 3: ratio approx / exact
+    # --------------------------------------------------
     plt.figure(figsize=(7, 6))
     ax = plt.gca()
+
+    ratio_exact_approx = num_gates_approx / num_gates_exact
 
     for i, fixed_d in enumerate(d_values):
         mask = np.isclose(d, fixed_d)
         x = min_overlap[mask]
-        y = ratio_approx_exact[mask]
+        y = ratio_exact_approx[mask]
 
         unique_x = np.unique(x)
         means_y = np.array([np.mean(y[x == ux]) for ux in unique_x])
@@ -455,7 +320,7 @@ def plot_gate_ratios():
         )
 
     ax.set_xlabel("minimum allowed overlap")
-    ax.set_ylabel("CNOT_approx / CNOT_exact")
+    ax.set_ylabel(r"$\mathrm{CNOT}_{\mathrm{approx}} / \mathrm{CNOT}_{\mathrm{exact}}$")
     ax.set_facecolor("#F9F9FB")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -468,11 +333,68 @@ def plot_gate_ratios():
     plt.show()
     plt.close()
 
-    print("Gate ratio plots saved")
+
+def plot_overlap_difference():
+    """
+    Plot the difference (overlap_estimate - actual_overlap) vs min_overlap,
+    one curve per d value, with error bars showing ±1 std over repeats.
+    """
+    if not FILEPATH.exists():
+        print(f"No data file found: {FILEPATH}")
+        return
+
+    (
+        min_ov,
+        d_arr,
+        overlap_estimate,
+        actual_overlap,
+        num_gates_approx,
+        num_gates_uniform,
+        num_gates_exact,
+    ) = _load_data()
+
+    diff = overlap_estimate - actual_overlap
+
+    _set_plot_style()
+    plt.figure(figsize=(7, 6))
+    ax = plt.gca()
+
+    for i, fixed_d in enumerate(d_values):
+        mask = np.isclose(d_arr, fixed_d)
+        x = min_ov[mask]
+        df = diff[mask]
+
+        unique_x = np.unique(x)
+        means_diff = np.array([np.mean(df[x == ux]) for ux in unique_x])
+        stds_diff = np.array([np.std(df[x == ux]) for ux in unique_x])
+
+        color = line_colors[i % len(line_colors)]
+        ax.errorbar(
+            unique_x,
+            means_diff,
+            yerr=stds_diff,
+            color=color,
+            ls="-",
+            marker="s",
+            markersize=4,
+            label=f"d = {fixed_d}",
+        )
+
+    ax.axhline(y=0, color="gray", ls="--", alpha=0.6)
+    ax.set_xlabel("Min Overlap allowed")
+    ax.set_ylabel("Overlap estimate $-$ Actual overlap")
+    ax.set_facecolor("#F9F9FB")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    outpath = plot_folder / f"overlap_difference_n_{n_qubit}.pdf"
+    plt.savefig(outpath, dpi=600, bbox_inches="tight")
+    plt.show()
+    plt.close()
+    print(f"Overlap difference plot saved: {outpath}")
 
 
 if __name__ == "__main__":
     collect(force_recollect=force)
-    plot_overlap_comparison()
+    plot()
     plot_overlap_difference()
-    plot_gate_ratios()

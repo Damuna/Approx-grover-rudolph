@@ -1,50 +1,19 @@
-import numpy as np 
+import numpy as np
 
 from .helping_functions import (
     ControlledRotationGateMap,
     _build_baseline_support,
     neighbour_dict,
-    _pattern_matches,
-    _branch_has_no_support
-    )
+    _branch_has_no_support,
+)
 
-__all__=["optimize_dict_support_aware_exact",
+__all__ = [
     "optimize_full_dict_support_aware_exact",
-    ]
+]
 
 
 def _same_gate(v1, v2, tol=1e-12):
     return (abs(v1[0] - v2[0]) <= tol) and (abs(v1[1] - v2[1]) <= tol)
-
-
-def _drop_unreachable_control_once(gate_operations, baseline_support, tol=1e-12):
-    """
-    Exact support-aware simplification:
-    remove one control from a gate if the newly added branch has zero support.
-    """
-    for key, value in list(gate_operations.items()):
-        for pos, ch in enumerate(key):
-            if ch == "e":
-                continue
-
-            flipped = "1" if ch == "0" else "0"
-            partner = key[:pos] + flipped + key[pos + 1 :]
-            new_key = key[:pos] + "e" + key[pos + 1 :]
-
-            if not _branch_has_no_support(partner, baseline_support):
-                continue
-
-            existing = gate_operations.get(new_key)
-            if (existing is not None) and (not _same_gate(existing, value, tol)):
-                # Cannot overwrite a different exact gate.
-                continue
-
-            gate_operations.pop(key)
-            if new_key not in gate_operations:
-                gate_operations[new_key] = value
-            return True
-
-    return False
 
 
 def _merge_identical_neighbours_once(gate_operations, tol=1e-12):
@@ -72,6 +41,7 @@ def _merge_identical_neighbours_once(gate_operations, tol=1e-12):
 
     return False
 
+
 def strip_zero_support_controls_maximally(key, baseline_support):
     changed = True
     while changed:
@@ -92,7 +62,6 @@ def strip_zero_support_controls_maximally(key, baseline_support):
 
 
 def optimize_dict_support_aware_exact(gate_operations, baseline_support, tol=1e-12):
-    # Step 1: strip every gate maximally once
     stripped = {}
     for key, value in list(gate_operations.items()):
         new_key = strip_zero_support_controls_maximally(key, baseline_support)
@@ -107,7 +76,6 @@ def optimize_dict_support_aware_exact(gate_operations, baseline_support, tol=1e-
     gate_operations.clear()
     gate_operations.update(stripped)
 
-    # Step 2: now only exact neighbour merges need saturation
     while _merge_identical_neighbours_once(gate_operations, tol=tol):
         pass
 
@@ -120,11 +88,6 @@ def optimize_full_dict_support_aware_exact(
 ):
     """
     Exact support-aware optimization for the full Grover-Rudolph circuit.
-    The baseline support is computed once from the original exact circuit.
-
-    Note:
-        This should be applied to the exact Grover-Rudolph circuit returned by
-        build_dictionary, before any approximate merging.
     """
     baseline_layers = [dict(layer_dict) for layer_dict in total_gate_operations]
     baseline_support = _build_baseline_support(baseline_layers)
