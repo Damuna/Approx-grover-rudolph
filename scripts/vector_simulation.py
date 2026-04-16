@@ -31,7 +31,7 @@ line_colors = ["#2D2F92", "#DC3977", "#FBB982", "#39737C", "#7DC36D"]
 
 # ── Parameters ──
 M = 20
-repeat = 1
+repeat = 20
 n_points = 10
 vec_type = "real"
 n_qubit = 15
@@ -52,6 +52,7 @@ plot_folder.mkdir(parents=True, exist_ok=True)
 
 N_PROCESSES = 1
 FILEPATH = data_folder / f"overlap_comparison_n_{n_qubit}_vector.npy"
+
 
 def _nonempty_layers_repr(dict_list):
     """
@@ -85,7 +86,6 @@ def compute_values(min_overlap: float, n_qubits: int, sparsity: int):
     )
 
     num_gates_approx = hybrid_CNOT_count(approx_angles)
-
 
     # Sparse overlap
     psi_approx_sparse = GR_circuit_sparse(approx_angles, return_sparse=True)
@@ -183,19 +183,22 @@ def _load_data():
 def _set_plot_style():
     SMALL_SIZE = 19
     MEDIUM_SIZE = 21
+    BIGGER_SIZE = 23
     params = {
         "ytick.color": "black",
         "xtick.color": "black",
         "axes.labelcolor": "black",
         "axes.edgecolor": "black",
-        "text.usetex": False,
+        "text.usetex": True,
         "font.family": "serif",
+        "font.serif": ["Computer Modern Serif"],
         "font.size": SMALL_SIZE,
         "axes.titlesize": SMALL_SIZE,
         "axes.labelsize": MEDIUM_SIZE,
         "xtick.labelsize": SMALL_SIZE,
         "ytick.labelsize": SMALL_SIZE,
         "legend.fontsize": SMALL_SIZE,
+        #"figure.titlesize": BIGGER_SIZE,
     }
     plt.rcParams.update(params)
 
@@ -277,7 +280,7 @@ def plot_overlap_comparison():
     ax.set_facecolor("#F9F9FB")
     ax.legend(
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.35),
+        bbox_to_anchor=(0.5, 1.3),
         ncol=2,
         fancybox=True,
         shadow=True,
@@ -358,7 +361,13 @@ def plot_overlap_difference():
     ax.set_xlabel("minimum allowed overlap")
     ax.set_ylabel("overlap error")
     ax.set_facecolor("#F9F9FB")
-    ax.legend()
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.3),
+        ncol=2,
+        fancybox=True,
+        shadow=True,
+    )
     ax.grid(True, alpha=0.3)
 
     outpath = plot_folder / f"overlap_error_n_{n_qubit}.pdf"
@@ -390,7 +399,7 @@ def plot_gate_ratios():
 
     _set_plot_style()
 
-    plt.figure(figsize=(7, 6))
+    plt.figure(figsize=(10, 7))
     ax = plt.gca()
 
     for i, fixed_d in enumerate(d_values):
@@ -416,7 +425,7 @@ def plot_gate_ratios():
         )
 
     ax.set_xlabel("minimum allowed overlap")
-    ax.set_ylabel("CNOT_exact / CNOT_uniform")
+    ax.set_ylabel("CNOTs Exact / CNOTs Uniform")
     ax.set_facecolor("#F9F9FB")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -429,7 +438,7 @@ def plot_gate_ratios():
     plt.show()
     plt.close()
 
-    plt.figure(figsize=(7, 6))
+    plt.figure(figsize=(10, 7))
     ax = plt.gca()
 
     for i, fixed_d in enumerate(d_values):
@@ -455,7 +464,7 @@ def plot_gate_ratios():
         )
 
     ax.set_xlabel("minimum allowed overlap")
-    ax.set_ylabel("CNOT_approx / CNOT_exact")
+    ax.set_ylabel("CNOTs Approx / CNOTs Exact")
     ax.set_facecolor("#F9F9FB")
     ax.legend()
     ax.grid(True, alpha=0.3)

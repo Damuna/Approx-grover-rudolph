@@ -143,7 +143,28 @@ def plot():
     ratio_approx_exact = num_gates_approx / num_gates_exact
 
     def _grouped_errorbar(y_values, ylabel, filename):
-        plt.figure(figsize=(10, 7))
+        SMALL_SIZE = 19
+        MEDIUM_SIZE = 21
+        BIGGER_SIZE = 23
+        params = {
+            "ytick.color" : "black",
+            "xtick.color" : "black",
+            "axes.labelcolor" : "black",
+            "axes.edgecolor" : "black",
+            "text.usetex" : True,
+            "font.family" : "serif",
+            "font.serif" : ["Computer Modern Serif"],
+            "font.size" : SMALL_SIZE,
+            "axes.titlesize" : SMALL_SIZE,
+            "axes.labelsize" : MEDIUM_SIZE,
+            "xtick.labelsize" : SMALL_SIZE,
+            "ytick.labelsize" : SMALL_SIZE,
+            "legend.fontsize" : SMALL_SIZE,
+            #"figure.titlesize" : BIGGER_SIZE,
+        }
+        plt.rcParams.update(params)
+        plt.figure(figsize=(7, 6))
+
         for i, fixed_d in enumerate(d_values):
             mask = np.isclose(d, fixed_d)
             x = min_overlap[mask]
@@ -151,32 +172,38 @@ def plot():
             unique_x = np.unique(x)
             means = [np.mean(y[x == ux]) for ux in unique_x]
             stds = [np.std(y[x == ux]) for ux in unique_x]
+            
             color = line_colors[i % len(line_colors)]
+            D_formatted = '{:.0e}'.format(D_values[i])
+            
             plt.errorbar(
-                unique_x,
-                means,
-                yerr=stds,
-                label=f"d = {fixed_d}",
-                color=color,
+                unique_x, means, yerr=stds,
+                label=f"D = {D_formatted}", color=color, fmt="--"
             )
-        plt.xlabel("Min overlap allowed")
+
+        plt.xlabel("minimum allowed overlap ")
         plt.ylabel(ylabel)
+        plt.yscale('log')
         plt.grid(True)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(plot_folder / filename)
+        ax = plt.gca()
+        ax.set_facecolor("#F9F9FB")
+        
+        # Used ncol=2 because there are 4 D_values, making a neat 2x2 grid.
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.25), ncol=2, fancybox=True, shadow=True)
+        
+        plt.savefig(plot_folder / filename, dpi=600, bbox_inches='tight')
         plt.show()
         plt.close()
         print(f"Plot saved: {plot_folder / filename}")
 
     _grouped_errorbar(
         ratio_exact_uniform,
-        "CNOTs Exact / CNOTs Uniform",
+        '$N_{\\mathrm{CNOT,exact}}$ / $N_{\\mathrm{CNOT,uniform}}$',
         f"ratio_uniform_exact_n_{n_qubit}.pdf",
     )
     _grouped_errorbar(
         ratio_approx_exact,
-        "CNOTs Approx / CNOTs Exact",
+        '$N_{\\mathrm{CNOT,approx}}$ / $N_{\\mathrm{CNOT,exact}}$',
         f"ratio_exact_approx_n_{n_qubit}.pdf",
     )
 
