@@ -32,20 +32,20 @@ line_colors = ["#2D2F92", "#DC3977", "#FBB982", "#39737C", "#7DC36D"]
 # ── Parameters ──
 M = 20
 M_values = [10, 50, 100]  # values used for the new fixed-D plot
-repeat = 10
-n_points = 5
+repeat = 20
+n_points = 10
 vec_type = "real"
-n_qubit = 15
+n_qubit = 20
 
 D_values = [1e-5, 5e-5, 1e-4, 5e-4]
 d_values = [max(1, int(D * 2**n_qubit)) for D in D_values]
 min_overlap_values = np.linspace(0.75, 1, num=n_points)
 
 # Fixed sparsity for the new M-sweep plot
-D_fixed = 5e-4
+D_fixed = 5e-5
 d_fixed = max(1, int(D_fixed * 2**n_qubit))
 
-# Forse recollection
+# Force recollection
 FORCE_RECOLLECT = True
 
 # ── Folders ──
@@ -55,7 +55,7 @@ data_folder.mkdir(parents=True, exist_ok=True)
 plot_folder = ROOT / "plots"
 plot_folder.mkdir(parents=True, exist_ok=True)
 
-N_PROCESSES = 8
+N_PROCESSES = 64
 FILEPATH = data_folder / f"ratios_n_{n_qubit}.npy"
 FILEPATH_M_SWEEP = data_folder / f"ratios_fixed_D_{D_fixed:.0e}_vs_M_n_{n_qubit}.npy"
 
