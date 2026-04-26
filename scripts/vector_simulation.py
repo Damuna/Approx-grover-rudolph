@@ -20,7 +20,6 @@ from approx_grover_rudolph import (
     build_dictionary,
     ordering_geometric_series,
     hybrid_CNOT_count,
-    GR_circuit,
     GR_circuit_sparse,
     optimize_full_dict_support_aware_exact,
 )
@@ -221,8 +220,7 @@ def plot_overlap_comparison():
 
     _set_plot_style()
 
-    plt.figure(figsize=(7, 6))
-    ax = plt.gca()
+    fig, ax = plt.subplots(len(D_values), 2, sharex=True, sharey='row')
 
     for i, fixed_d in enumerate(d_values):
         mask = np.isclose(d, fixed_d)
@@ -233,59 +231,58 @@ def plot_overlap_comparison():
 
         unique_x = np.unique(x)
         means_ao = [np.mean(ao[x == ux]) for ux in unique_x]
-        stds_ao = [np.std(ao[x == ux]) for ux in unique_x]
         means_oe = [np.mean(oe[x == ux]) for ux in unique_x]
-        stds_oe = [np.std(oe[x == ux]) for ux in unique_x]
         means_rb = [np.mean(rb[x == ux]) for ux in unique_x]
-        stds_rb = [np.std(rb[x == ux]) for ux in unique_x]
+
+        # new plot
+        diffs_overlap_vs_estimate_mean = [ np.mean(ao[x == ux] - oe[x == ux]) for ux in unique_x ]
+        diffs_overlap_vs_bound_mean = [ np.mean(ao[x == ux] - rb[x == ux]) for ux in unique_x ]
+        diffs_estimate_vs_bound_mean = [ np.mean(oe[x == ux] - rb[x == ux]) for ux in unique_x ]
+
+        diffs_overlap_vs_estimate_min = [ np.min(ao[x == ux] - oe[x == ux]) for ux in unique_x ]
+        diffs_overlap_vs_bound_min = [ np.min(ao[x == ux] - rb[x == ux]) for ux in unique_x ]
+        diffs_estimate_vs_bound_min = [ np.min(oe[x == ux] - rb[x == ux]) for ux in unique_x ]
+
+        diffs_overlap_vs_estimate_max = [ np.max(ao[x == ux] - oe[x == ux]) for ux in unique_x ]
+        diffs_overlap_vs_bound_max = [ np.max(ao[x == ux] - rb[x == ux]) for ux in unique_x ]
+        diffs_estimate_vs_bound_max = [ np.max(oe[x == ux] - rb[x == ux]) for ux in unique_x ]
 
         color = line_colors[i % len(line_colors)]
         D_formatted = "{:.0e}".format(D_values[i])
 
-        ax.errorbar(
+        ax[i, 0].plot(
             unique_x,
-            means_ao,
-            yerr=stds_ao,
-            label=f"D = {D_formatted} (true)",
+            diffs_overlap_vs_estimate_mean,
+            label=f"D = {D_formatted}",
             color=color,
-            fmt="-",
-            linewidth=2,
+            marker="o",
+            linestyle="--"
         )
 
-        ax.errorbar(
+        ax[i, 1].plot(
             unique_x,
-            means_oe,
-            yerr=stds_oe,
-            fmt="o",
+            diffs_overlap_vs_bound_mean,
             color=color,
-            alpha=0.6,
-            markersize=6,
-            label=f"D = {D_formatted} (estimate)",
+            marker="o",
+            linestyle="--"
         )
+        ax[i, 0].fill_between(unique_x, diffs_overlap_vs_estimate_min, diffs_overlap_vs_estimate_max, facecolor=color, alpha=0.3)
+        ax[i, 1].fill_between(unique_x, diffs_overlap_vs_bound_min, diffs_overlap_vs_bound_max, facecolor=color, alpha=0.3)
 
-        ax.errorbar(
-            unique_x,
-            means_rb,
-            yerr=stds_rb,
-            fmt="^",
-            color=color,
-            alpha=0.6,
-            linestyle="--",
-            markersize=5,
-            label=f"D = {D_formatted} (bound)",
-        )
+        ax[i, 0].axhline(0,color='black', linestyle=':')
+        ax[i, 1].axhline(0,color='black', linestyle=':')
 
-    ax.set_xlabel("minimum allowed overlap")
-    ax.set_ylabel("overlap")
-    ax.set_facecolor("#F9F9FB")
-    ax.legend(
-        loc="upper center",
-        bbox_to_anchor=(0.5, 1.3),
-        ncol=2,
-        fancybox=True,
-        shadow=True,
-    )
-    ax.grid()
+        ax[i, 0].set_facecolor("#F9F9FB")
+        ax[i, 1].set_facecolor("#F9F9FB")
+
+    plt.rc('text.latex', preamble=r'\usepackage{amsmath}')
+    ax[0, 0].set_title(r'$\mathcal{F} - \mathcal{F}_{\text{est}}$')
+    ax[0, 1].set_title(r'$\mathcal{F} - \mathcal{F}_{\text{LB}}$')
+    ax[len(D_values) - 1, 0].set_xlabel(r"$\mathcal{F}_{\text{min}}$")
+    ax[len(D_values) - 1, 1].set_xlabel(r"$\mathcal{F}_{\text{min}}$")
+    lines_labels = [ax.get_legend_handles_labels() for ax in fig.axes]
+    lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
+    fig.legend(lines, labels, loc='upper center', ncol=4, fancybox=True, shadow=True, bbox_to_anchor=(0.5, 1.1))
 
     plt.savefig(
         plot_folder / f"overlap_comparison_n_{n_qubit}_vector.pdf",
