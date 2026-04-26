@@ -2,13 +2,11 @@ from .helping_functions import generate_sparse_unit_vector
 
 from .approx_algorithm import (
     ordering_geometric_series,
-    optimize_full_dict,
 )
 
 from .grover_rudolph import (
     build_dictionary,
     GR_circuit_sparse,
-    GR_circuit,
 )
 
 from .gate_count import (

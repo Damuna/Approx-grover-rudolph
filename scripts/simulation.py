@@ -431,6 +431,6 @@ def plot():
 
 
 if __name__ == "__main__":
-    # collect()
+    collect()
     collect_M_sweep()
     plot()

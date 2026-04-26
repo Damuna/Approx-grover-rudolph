@@ -15,7 +15,7 @@ import matplotlib
 from approx_grover_rudolph import (
     generate_sparse_unit_vector,
     build_dictionary,
-    optimize_full_dict,
+    optimize_full_dict_support_aware_exact,
     hybrid_CNOT_count,
     single_rotation_count,
 )
@@ -45,8 +45,8 @@ FILEPATH = data_folder / f"cnots_vs_d_n_{n_qubit}.npy"
 def compute_values(n_qubits: int, sparsity: int):
     """Return npy line: d  num_gates_uniform  num_gates_eps_zero  num_gates_single_rot"""
     psi = generate_sparse_unit_vector(n_qubits, sparsity, vector_type=vec_type)
-    angles_phases = build_dictionary(psi)
-    angle_phases_zero = optimize_full_dict(copy.deepcopy(angles_phases))
+    angles_phases = build_dictionary(psi, n_qubits)
+    angle_phases_zero = optimize_full_dict_support_aware_exact(copy.deepcopy(angles_phases))
 
     num_gates_uniform = (2**n_qubits) - 1
     num_gates_eps_zero = hybrid_CNOT_count(angle_phases_zero)

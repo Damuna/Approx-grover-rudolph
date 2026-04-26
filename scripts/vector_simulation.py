@@ -20,7 +20,6 @@ from approx_grover_rudolph import (
     build_dictionary,
     ordering_geometric_series,
     hybrid_CNOT_count,
-    GR_circuit,
     GR_circuit_sparse,
     optimize_full_dict_support_aware_exact,
 )

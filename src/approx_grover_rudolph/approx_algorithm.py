@@ -1,48 +1,18 @@
 import numpy as np
 
 from .helping_functions import (
-    ControlledRotationGateMap,
     neighbour_dict,
-    generate_strings,
-    f_cs,
+    _pattern_matches,
+    _matching_value,
+    _build_baseline_support,
 )
 
 __all__ = [
     "merging_formula",
     "ordering_geometric_series",
     "order_pairs_optimally",
-    "optimize_dict",
-    "run_one_merge_step",
-    "optimize_full_dict",
 ]
 
-
-def _pattern_matches(pattern, bit_string):
-    return all(p == "e" or p == b for p, b in zip(pattern, bit_string))
-
-
-def _patterns_overlap(p1, p2):
-    return all(a == "e" or b == "e" or a == b for a, b in zip(p1, p2))
-
-
-def _matching_value(prefix, angles_phases_dict):
-    """
-    Return the most specific gate in angles_phases_dict matching the concrete prefix.
-    Needed because the dictionaries can contain keys with 'e'.
-    """
-    best_value = None
-    best_specificity = -1
-
-    for pattern, value in angles_phases_dict.items():
-        if len(pattern) != len(prefix):
-            continue
-        if _pattern_matches(pattern, prefix):
-            specificity = sum(ch != "e" for ch in pattern)
-            if specificity > best_specificity:
-                best_specificity = specificity
-                best_value = value
-
-    return best_value if best_value is not None else (0.0, 0.0)
 
 
 def _build_prefix_tables(baseline_support, n_layers):
@@ -64,6 +34,7 @@ def _build_prefix_tables(baseline_support, n_layers):
 
     supported_prefixes = [tuple(tbl.keys()) for tbl in prefix_probs]
     return prefix_probs, supported_prefixes
+
 
 def _active_key_for_baseline_key(baseline_key, active_layer):
     """
@@ -98,45 +69,11 @@ def _active_key_for_baseline_key(baseline_key, active_layer):
     return best_key
 
 
-def _build_baseline_support(baseline_ops, tol=1e-15):
-    """
-    Build the nonzero leaves of the baseline circuit together with their
-    probabilities. For a d-sparse target state, this list has size O(d).
-    """
-    n_layers = len(baseline_ops)
-    support = []
-
-    def dfs(prefix, prob):
-        depth = len(prefix)
-        if depth == n_layers:
-            if prob > tol:
-                support.append((prefix, prob))
-            return
-
-        theta = _matching_value(prefix, baseline_ops[depth])[0]
-
-        p0 = prob * f_cs(theta, "0")
-        if p0 > tol:
-            dfs(prefix + "0", p0)
-
-        p1 = prob * f_cs(theta, "1")
-        if p1 > tol:
-            dfs(prefix + "1", p1)
-
-    dfs("", 1.0)
-    return support
-
-
 def _probability_weight(pattern, baseline_support, prob_cache, prefix_probs=None):
     """
     P(pattern) from sparse baseline support.
 
-    Fast path:
-      if pattern is concrete (contains no 'e') and prefix_probs is available,
-      return in O(1).
-
-    Fallback:
-      scan the sparse baseline support in O(d).
+    Scan the sparse baseline support in O(d).
     """
     if pattern in prob_cache:
         return prob_cache[pattern]
@@ -321,10 +258,6 @@ def _candidate_source_map(
 
     If regional_merges=False and the enlarged region would absorb extra
     active keys beyond the intended ones, return None to block the merge.
-
-    Speed:
-        This scans only the sparse supported concrete prefixes at this depth,
-        not all strings in generate_strings(new_key).
     """
     depth = len(new_key)
     active_layer = gate_operations[depth]
@@ -353,7 +286,6 @@ def _candidate_source_map(
         old_loss += merge_state["losses"][cid]
 
     # Add supported concrete prefixes in the region that are not already covered.
-    # These are genuine zero-angle baseline sources.
     supported_prefixes = merge_state["supported_prefixes"][depth]
     for prefix in supported_prefixes:
         if prefix in source_map:
@@ -438,7 +370,7 @@ def _cluster_prefix_amplification(source_map, depth, baseline_support, prefix_am
 
 def _compute_rigorous_bound_from_active_circuit(merge_state, active_ops):
     """
-    Correct theorem implementation:
+    Lower Bound:
 
         <psi'|psi> >= 1 - sum_C R_C L_C,
 
@@ -766,64 +698,3 @@ def order_pairs_optimally(
         merged_any = True
 
     return overlap, merged_any
-
-
-def optimize_dict(
-    gate_operations: ControlledRotationGateMap,
-    error,
-) -> ControlledRotationGateMap:
-    """
-    Optimize the dictionary by merging some gates in one:
-    if the two values are the same and they only differ in one control
-    they can be merged.
-    """
-    merged = True
-
-    while merged:
-        merged = run_one_merge_step(gate_operations, error)
-
-    return gate_operations
-
-
-def run_one_merge_step(gate_operations: ControlledRotationGateMap, error) -> bool:
-    """
-    Run a single merging step, modifying the input dictionary.
-    """
-    if len(gate_operations) <= 1:
-        return False
-
-    for k1, v1 in gate_operations.items():
-        neighbours = neighbour_dict(k1)
-
-        for k2, position in neighbours.items():
-            if k2 not in gate_operations:
-                continue
-
-            v2 = gate_operations[k2]
-
-            if (abs(v1[0] - v2[0]) / 2 > error) or (abs(v1[1] - v2[1]) / 2 > error):
-                continue
-
-            gate_operations.pop(k1)
-            gate_operations.pop(k2)
-            eps = np.abs(v2[0] - v1[0]) / 2
-            gate_operations[k1[:position] + "e" + k1[position + 1 :]] = (
-                min(v2[0] + eps, v1[0] + eps),
-                min(v2[1] + eps, v1[1] + eps),
-            )
-            return True
-
-    return False
-
-
-def optimize_full_dict(
-    total_gate_operations: list[ControlledRotationGateMap],
-    optimization_error: float = 0,
-):
-    final_gates: list[ControlledRotationGateMap] = []
-
-    for gate_operations in total_gate_operations:
-        gate_operations = optimize_dict(gate_operations, error=optimization_error)
-        final_gates.append(gate_operations)
-
-    return final_gates

@@ -1,8 +1,5 @@
-import numpy as np
-
 from .helping_functions import ControlledRotationGateMap
 
-GateCounts = np.ndarray
 
 __all__ = [
     "single_rotation_count",
@@ -22,7 +19,7 @@ def _single_gate_cnot_cost(key: str) -> int:
 
 def single_rotation_count(
     total_gate_operations: list[ControlledRotationGateMap],
-) -> GateCounts:
+) -> int:
     """
     Count the CNOT cost of implementing every controlled rotation gate directly.
     """
