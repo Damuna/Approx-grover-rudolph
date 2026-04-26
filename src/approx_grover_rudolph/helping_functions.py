@@ -1,6 +1,8 @@
 import numpy as np
 import scipy as sp
 
+from typing import Union
+
 
 __all__ = [
     "RotationGate",

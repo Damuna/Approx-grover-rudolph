@@ -1,11 +1,10 @@
 """
 Approximate simulation.
-Generates three plots:
-  1. CNOTs Exact / CNOTs Uniform vs min overlap allowed
-  2. CNOTs Approx / CNOTs Exact  vs min overlap allowed
-     Both with curves for different d values
-  3. CNOTs Approx / CNOTs Exact vs min overlap allowed
-     for fixed sparsity D = 5e-5 and different values of M
+Generates two plots:
+  1. CNOTs Approx / CNOTs Exact vs min overlap allowed
+     with curves for different sparsities D
+  2. CNOTs Approx / CNOTs Exact vs min overlap allowed
+     for fixed sparsity D and different values of M
 """
 
 from pathlib import Path
@@ -17,7 +16,6 @@ import time
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 
 from approx_grover_rudolph import (
     generate_sparse_unit_vector,
@@ -71,16 +69,13 @@ FILEPATH_M_SWEEP = data_folder / f"ratios_fixed_D_{D_fixed:.0e}_vs_M_n_{n_qubit}
 def compute_values(min_overlap: float, n_qubits: int, sparsity: int):
     psi = generate_sparse_unit_vector(n_qubits, sparsity, vector_type=vec_type)
 
-    # Standard Grover-Rudolph dictionary
     baseline_angles = build_dictionary(psi, n_qubits)
 
-    # Exact support-aware merging
     exact_angles = optimize_full_dict_support_aware_exact(
         copy.deepcopy(baseline_angles)
     )
     num_gates_exact = hybrid_CNOT_count(exact_angles)
 
-    # Approximate mergings with the default/global M
     approx_angles = copy.deepcopy(exact_angles)
     ordering_geometric_series(
         approx_angles,
@@ -92,11 +87,9 @@ def compute_values(min_overlap: float, n_qubits: int, sparsity: int):
     )
     num_gates_approx = hybrid_CNOT_count(approx_angles)
 
-    num_gates_uniform = (2**n_qubits) - 1
-
     return (
-        f"{min_overlap}\t{sparsity}\t{num_gates_approx}\t"
-        f"{num_gates_uniform}\t{num_gates_exact}\n"
+        f"{min_overlap}\t{sparsity}\t"
+        f"{num_gates_approx}\t{num_gates_exact}\n"
     )
 
 
@@ -255,45 +248,6 @@ def _set_plot_style():
     plt.figure(figsize=(7, 6))
 
 
-def _decimal_log_formatter(y, _pos):
-    if y <= 0:
-        return ""
-
-    return f"{y:g}"
-
-
-def _finalize_plot(filename, legend_ncol=2):
-    plt.xlabel(r"$\mathcal{F}_{\min}$")
-    #plt.yscale("log")
-
-    ax = plt.gca()
-
-    # Keep log scale, but write labels as decimals: 0.5 instead of 5 x 10^{-1}.
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(_decimal_log_formatter))
-    ax.yaxis.set_minor_formatter(mticker.FuncFormatter(_decimal_log_formatter))
-
-    # Same grid call as in the reference plot.
-    plt.grid(True)
-
-    # Same layout/background order as in the reference plot.
-    plt.tight_layout()
-    ax.set_facecolor("#F9F9FB")
-
-    ax.legend(
-        loc="upper center",
-        bbox_to_anchor=(0.5, 1.25),
-        ncol=legend_ncol,
-        fancybox=True,
-        shadow=True,
-    )
-
-    plt.savefig(plot_folder / filename, dpi=600, bbox_inches="tight")
-    plt.show()
-    plt.close()
-
-    print(f"Plot saved: {plot_folder / filename}")
-
-
 def _grouped_errorbar_by_d(x_values, d_data, y_values, ylabel, filename):
     _set_plot_style()
 
@@ -350,11 +304,32 @@ def _grouped_errorbar_by_M(x_values, M_data, y_values, ylabel, filename):
         )
 
     plt.ylabel(ylabel)
-
     _finalize_plot(
         filename,
         legend_ncol=min(2, len(M_values)) if len(M_values) > 1 else 1,
     )
+
+
+def _finalize_plot(filename, legend_ncol=2):
+    plt.xlabel(r"$\mathcal{F}_{\min}$")
+    plt.grid(True)
+    plt.tight_layout()
+
+    ax = plt.gca()
+    ax.set_facecolor("#F9F9FB")
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.25),
+        ncol=legend_ncol,
+        fancybox=True,
+        shadow=True,
+    )
+
+    plt.savefig(plot_folder / filename, dpi=600, bbox_inches="tight")
+    plt.show()
+    plt.close()
+
+    print(f"Plot saved: {plot_folder / filename}")
 
 
 def plot():
@@ -366,32 +341,16 @@ def plot():
         min_overlap,
         d,
         num_gates_approx,
-        num_gates_uniform,
         num_gates_exact,
     ) = np.loadtxt(FILEPATH, unpack=True)
 
     with np.errstate(divide="ignore", invalid="ignore"):
-        ratio_exact_uniform = np.divide(
-            num_gates_exact,
-            num_gates_uniform,
-            out=np.full_like(num_gates_exact, np.nan, dtype=float),
-            where=num_gates_uniform > 0,
-        )
-
         ratio_approx_exact = np.divide(
             num_gates_approx,
             num_gates_exact,
             out=np.full_like(num_gates_approx, np.nan, dtype=float),
             where=num_gates_exact > 0,
         )
-
-    _grouped_errorbar_by_d(
-        min_overlap,
-        d,
-        ratio_exact_uniform,
-        r"$N_{\mathrm{CNOT,exact}} / N_{\mathrm{CNOT,uniform}}$",
-        f"ratio_uniform_exact_n_{n_qubit}.pdf",
-    )
 
     _grouped_errorbar_by_d(
         min_overlap,
@@ -428,7 +387,6 @@ def plot():
         r"$N_{\mathrm{CNOT,approx}} / N_{\mathrm{CNOT,exact}}$",
         f"ratio_exact_approx_fixed_D_{D_fixed:.0e}_vs_M_n_{n_qubit}.pdf",
     )
-
 
 if __name__ == "__main__":
     collect()
