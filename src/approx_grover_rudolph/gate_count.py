@@ -1,88 +1,44 @@
-import numpy as np
-
 from .helping_functions import ControlledRotationGateMap
 
-GateCounts = np.ndarray
 
-__all__=[
+__all__ = [
     "single_rotation_count",
-    "hybrid_CNOT_count"
-    ]
+    "hybrid_CNOT_count",
+]
+
+
+def _single_gate_cnot_cost(key: str) -> int:
+    n_controls = key.count("0") + key.count("1")
+
+    if n_controls == 0:
+        return 0
+    if n_controls == 1:
+        return 2
+    return 16 * n_controls - 24
 
 
 def single_rotation_count(
     total_gate_operations: list[ControlledRotationGateMap],
-) -> GateCounts:
+) -> int:
     """
-    Counts how many gates you need to build the circuit for Grover Rudolph (optimized or not optimized, but without permutations) in terms of elemental ones (single rotation gates, one-control-one-target
-    gates on the |1⟩ state, refered as 2 qubits gates, and Toffoli gates)
-
-    Args:
-        total_gate_operations = the list of dictionaries of the form dict[str] = [float,float], where str is made of '0','1','e'
-
-    Returns:
-        N_cnots
+    Count the CNOT cost of implementing every controlled rotation gate directly.
     """
-    N_cnot = 0
-
-    for gate_operations in total_gate_operations:
-        # Build the unitary for each dictonary
-        N_cnot_layer = 0
-
-        for k in gate_operations:
-            # Count number of controls
-            count0 = k.count("0")
-            count1 = k.count("1")
-            N_controls = count0 + count1
-
-            if N_controls == 0:
-                N_cnot_layer += 0
-            elif N_controls == 1:
-                N_cnot_layer += 2
-            else:
-                N_cnot_layer += 16 * (N_controls) - 24
-
-        N_cnot += N_cnot_layer
-
-    return N_cnot
+    return sum(
+        _single_gate_cnot_cost(k)
+        for gate_operations in total_gate_operations
+        for k in gate_operations
+    )
 
 
 def hybrid_CNOT_count(
     total_gate_operations: list[ControlledRotationGateMap],
 ) -> int:
-    """
-    Counts how many gates you need to build the circuit for Grover Rudolph (optimized or not optimized, but without permutations) in terms of elemental ones (single rotation gates, one-control-one-target
-    gates on the |1⟩ state, refered as 2 qubits gates, and Toffoli gates)
-
-    Args:
-        total_gate_operations = the list of dictionaries of the form dict[str] = [float,float], where str is made of '0','1','e'
-
-    Returns:
-        N_cnots
-    """
-    N_cnot = 0
+    total = 0
 
     for gate_operations in total_gate_operations:
-        # Build the unitary for each dictonary
-        N_cnot_layer = 0
+        layer_cost = sum(_single_gate_cnot_cost(k) for k in gate_operations)
+        n_qubits_layer = max((len(k) for k in gate_operations), default=0)
+        uniform_cost = 2 ** n_qubits_layer
+        total += min(layer_cost, uniform_cost)
 
-        for k in gate_operations:
-            # Count number of controls
-            count0 = k.count("0")
-            count1 = k.count("1")
-            N_controls = count0 + count1
-
-            if N_controls == 0:
-                N_cnot_layer += 0
-            elif N_controls == 1:
-                N_cnot_layer += 2
-            else:
-                N_cnot_layer += 16 * (N_controls) - 24
-
-        # Uniform rotation counting
-        if N_cnot_layer > 2 ** len(k):
-            N_cnot_layer = 2 ** len(k)
-
-        N_cnot += N_cnot_layer
-
-    return N_cnot
+    return total
