@@ -1,8 +1,7 @@
-from typing import Sized, Union
-from itertools import product
-
 import numpy as np
 import scipy as sp
+
+from typing import Union
 
 
 __all__ = [
@@ -12,11 +11,8 @@ __all__ = [
     "ZERO",
     "neighbour_dict",
     "generate_sparse_unit_vector",
-    "number_of_qubits",
     "sanitize_sparse_state_vector",
-    "replace_first_non_e",
     "f_cs",
-    "generate_strings",
 ]
 
 RotationGate = tuple[float, float]
@@ -68,22 +64,6 @@ def generate_sparse_unit_vector(
     return sparse_v
 
 
-def replace_first_non_e(s):
-    s_list = list(s)
-    for i in range(len(s_list)):
-        if s_list[i] != "e":
-            s_list[i] = "e"
-            break
-    return "".join(s_list), i
-
-
-def number_of_qubits(vec: int | Sized) -> int:
-    sz: int = vec if isinstance(vec, int) else len(vec)
-    if sz == 1:
-        return 1
-    return int(np.ceil(np.log2(sz)))
-
-
 def sanitize_sparse_state_vector(
     vec: StateVector, *, copy=True
 ) -> sp.sparse.csr_matrix:
@@ -102,21 +82,6 @@ def f_cs(theta, i):
     if i == "1":
         return np.sin(theta / 2) ** 2
     raise ValueError("smth wrong in input i of f_cs")
-
-
-def generate_strings(s):
-    positions = [i for i, char in enumerate(s) if char == "e"]
-    num_e = len(positions)
-    replacements = product("01", repeat=num_e)
-
-    result = []
-    for replacement in replacements:
-        s_list = list(s)
-        for i, char in zip(positions, replacement):
-            s_list[i] = char
-        result.append("".join(s_list))
-
-    return result
 
 
 def _branch_has_no_support(pattern, baseline_support, tol=1e-15):

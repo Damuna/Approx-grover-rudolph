@@ -1,5 +1,3 @@
-import numpy as np
-
 from .helping_functions import (
     ControlledRotationGateMap,
     _build_baseline_support,
