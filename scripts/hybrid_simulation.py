@@ -141,9 +141,9 @@ def plot():
                  label="UCR", color="#2D2F92")
     plt.errorbar(d_unique, means_single, yerr=stds_single, fmt="s--",
              label="single", color="#DC3977")
-    plt.errorbar(d_unique, means_hybrid, yerr=stds_hybrid, fmt="^--", label="hybrid", color="green")
+    plt.errorbar(d_unique, means_hybrid, yerr=stds_hybrid, fmt="^--", label="exact", color="green")
     plt.xlabel("D")
-    plt.ylabel("\\# CNOT gates")
+    plt.ylabel(r"$N_{\mathrm{CNOT}}$")
     plt.xscale('log')
     plt.yscale('log')
     plt.legend()
